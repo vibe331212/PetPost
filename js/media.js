@@ -48,16 +48,22 @@ export async function processVideo(file) {
   const url = URL.createObjectURL(file);
   const video = document.createElement('video');
   video.playsInline = true;
-  video.preload = 'auto';
+  video.preload = 'metadata';
   video.muted = true;
   video.src = url;
   try {
-    await new Promise((resolve, reject) => {
-      video.onloadeddata = resolve;
-      video.onerror = () => reject(new Error('This video format is not supported by your browser. Try an MP4.'));
+    // iPhones only load the video's details (not its pictures) for a video that isn't on screen,
+    // so wait for metadata, and give up waiting after a few seconds rather than hang.
+    const loaded = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(false), 8000);
+      video.onloadedmetadata = () => { clearTimeout(timer); resolve(true); };
+      video.onerror = () => { clearTimeout(timer); reject(new Error('This video format is not supported here. Try an MP4 or a video from your camera.')); };
+      video.load();
     });
-    await resolveDuration(video);
-    if (video.duration > MAX_VIDEO_SECONDS + 0.5) throw new Error(`Videos can be up to ${MAX_VIDEO_SECONDS} seconds long.`);
+    if (loaded) {
+      await resolveDuration(video);
+      if (video.duration > MAX_VIDEO_SECONDS + 0.5) throw new Error(`Videos can be up to ${MAX_VIDEO_SECONDS} seconds long.`);
+    }
     return { blob: file, type: 'video', width: video.videoWidth, height: video.videoHeight, report: {} };
   } finally {
     URL.revokeObjectURL(url);

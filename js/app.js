@@ -127,6 +127,13 @@ document.addEventListener('dblclick', e => {
   if (!btn.classList.contains('on')) actions.lick(btn);
 });
 
+// On phones the fixed bottom bar rides up on top of the keyboard; hide it while typing.
+const isTyping = el => el?.matches?.('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select');
+document.addEventListener('focusin', e => { if (isTyping(e.target)) document.body.classList.add('typing'); });
+document.addEventListener('focusout', () => setTimeout(() => {
+  if (!isTyping(document.activeElement)) document.body.classList.remove('typing');
+}, 50));
+
 function formError(form, msg) {
   const el = form.querySelector('.form-error');
   if (el) el.textContent = msg;
@@ -320,7 +327,7 @@ actions['sign-out'] = () => {
 function mediaEl(p, { autoplay = false } = {}) {
   const src = blobURL(p.id, p.media);
   if (p.mediaType === 'video') {
-    return `<video src="${src}" controls playsinline preload="metadata" ${autoplay ? 'autoplay' : ''} loop></video>`;
+    return `<video src="${src}#t=0.001" controls playsinline preload="metadata" ${autoplay ? 'autoplay' : ''} loop></video>`;
   }
   return `<img src="${src}" alt="Photo shared by ${esc(p.author)}" loading="lazy">`;
 }
@@ -782,7 +789,7 @@ function showResult(root) {
   const count = draft.stickers?.length || 0;
   root.querySelector('.stage').innerHTML = `
     <div class="preview">${r.type === 'video'
-      ? `<video src="${draft.previewURL}" controls playsinline autoplay loop muted></video>`
+      ? `<video src="${draft.previewURL}#t=0.001" controls playsinline autoplay loop muted></video>`
       : `<img src="${draft.previewURL}" alt="Preview">`}</div>
     ${r.type === 'image' ? `<button type="button" class="btn ghost sticker-btn" data-action="stickers">${icon('sparkle')}${count ? `Edit stickers (${count})` : 'Add stickers'}</button>` : ''}`;
   root.querySelector('.publish').hidden = false;

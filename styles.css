@@ -572,3 +572,16 @@ button.mode-chip { cursor: pointer; color: var(--text); font: inherit; font-size
 .update-bar .ic { width: 18px; height: 18px; }
 .danger-zone summary { color: #e5484d; }
 .fine a, .modal a { color: var(--accent); font-weight: 600; }
+
+/* ---------- phones */
+/* iPhones zoom the whole page in when a text box uses text smaller than 16px */
+input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px; }
+@media (hover: none) { body.typing .nav { display: none; } }
+/* A frosted strip behind the clock and battery, so scrolled content doesn't run underneath them */
+body::before {
+  content: ''; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top); z-index: 25; pointer-events: none;
+  background: var(--surface); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+}
+/* Upright phone videos and photos shouldn't fill the whole screen */
+.preview img, .preview video { max-height: 46vh; }
+.media img, .media video { max-height: 62vh; }

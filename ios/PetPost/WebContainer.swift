@@ -22,6 +22,12 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         config.websiteDataStore = .default()   // keeps accounts, posts and photos between launches
         config.setURLSchemeHandler(BundleSchemeHandler(), forURLScheme: Self.scheme)
         config.userContentController.add(WeakMessageHandler(self), name: "petpost")
+        // An app shouldn't pinch-zoom or zoom in on text boxes like a website does.
+        let noZoom = """
+        document.querySelector('meta[name=viewport]')?.setAttribute('content',
+          'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+        """
+        config.userContentController.addUserScript(WKUserScript(source: noZoom, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
