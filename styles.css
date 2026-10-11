@@ -570,3 +570,5 @@ button.mode-chip { cursor: pointer; color: var(--text); font: inherit; font-size
   max-width: calc(100% - 32px); animation: fade .3s;
 }
 .update-bar .ic { width: 18px; height: 18px; }
+.danger-zone summary { color: #e5484d; }
+.fine a, .modal a { color: var(--accent); font-weight: 600; }

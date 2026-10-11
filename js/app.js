@@ -11,6 +11,7 @@ import { openStickerEditor } from './stickers.js';
 const $app = document.getElementById('app');
 const scene = new Scene(document.getElementById('scene'));
 const MOMENT_TTL = 24 * 60 * 60 * 1000;
+const PRIVACY_URL = 'https://vibe331212.github.io/PetPost/privacy.html';
 const actions = {};
 const forms = {};
 let me = null;
@@ -58,8 +59,21 @@ function avatar(u, size = 'md') {
   return `<span class="avatar ${size}">${inner}</span>`;
 }
 
+// When PetPost runs inside the iPhone app, it can ask the phone for things a website can't do.
+const Native = (() => {
+  const h = window.webkit?.messageHandlers?.petpost;
+  return { on: !!h, send(m) { try { h?.postMessage(m); } catch { /* not in the app */ } } };
+})();
+const blobToBase64 = blob => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1]);
+  r.onerror = reject;
+  r.readAsDataURL(blob);
+});
+
 const extFor = type => type.includes('mp4') ? 'mp4' : type.includes('webm') ? 'webm' : type.includes('png') ? 'png' : 'jpg';
-function downloadBlob(blob, name) {
+function downloadBlob(blob, name, text = '') {
+  if (Native.on) { blobToBase64(blob).then(data => Native.send({ type: 'share', data, name, text })); return; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -85,6 +99,7 @@ function go(hash) {
 function applyTheme(id) {
   const theme = findTheme(id);
   document.body.dataset.tone = theme.tone;
+  Native.send({ type: 'tone', tone: theme.tone });
   document.documentElement.style.setProperty('--accent', theme.accent);
   scene.set(theme);
   const chip = document.querySelector('.mode-chip span');
@@ -200,7 +215,7 @@ function renderAuth(mode = 'signin') {
           <button role="tab" aria-selected="${mode === 'signup'}" class="${mode === 'signup' ? 'on' : ''}" data-action="auth-mode" data-mode="signup">Create account</button>
         </div>
         ${mode === 'signin' ? signin : signup}
-        <p class="fine">${icon('shield')} Your password is encrypted before it is saved. Accounts live on this device.</p>
+        <p class="fine">${icon('shield')} <span>Your password is encrypted before it is saved. Accounts live on this device. <a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy policy</a></span></p>
       </div>
     </main>`;
   $app.querySelector('input')?.focus();
@@ -276,6 +291,7 @@ async function withBusy(form, fn) {
 
 forms.signin = (form, fd) => withBusy(form, async () => {
   me = await auth.signIn(fd.get('username'), fd.get('password'));
+  syncNativeCare();
   applyTheme(me.theme);
   go('#/feed');
 });
@@ -294,6 +310,7 @@ forms.signup = (form, fd) => withBusy(form, async () => {
 actions['sign-out'] = () => {
   auth.signOut();
   me = null;
+  syncNativeCare();
   applyTheme('clean');
   history.replaceState(null, '', location.pathname);
   renderAuth();
@@ -366,14 +383,16 @@ actions.download = async el => {
   const p = await db.get('posts', el.dataset.id);
   if (!p) return;
   downloadBlob(p.media, fileName(p));
-  toast(p.mediaType === 'video' ? 'Video saved to your device' : 'Photo saved to your device');
+  if (!Native.on) toast(p.mediaType === 'video' ? 'Video saved to your device' : 'Photo saved to your device');
 };
 
 actions.share = async el => {
   const p = await db.get('posts', el.dataset.id);
   if (!p) return;
+  const text = p.caption || `A post from @${p.author} on PetPost`;
+  if (Native.on) return downloadBlob(p.media, fileName(p), text);
   const file = new File([p.media], fileName(p), { type: p.media.type });
-  const data = { title: 'PetPost', text: p.caption || `A post from @${p.author} on PetPost`, files: [file] };
+  const data = { title: 'PetPost', text, files: [file] };
   if (navigator.canShare?.(data)) {
     try { await navigator.share(data); }
     catch (err) { if (err.name !== 'AbortError') toast('Sharing did not work. Try saving it instead.'); }
@@ -664,6 +683,13 @@ function updateKindUI() {
 
 actions['open-camera'] = async () => {
   if (!draft || draft.busy) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    const input = document.querySelector('.create .file-input');
+    input.setAttribute('capture', 'environment');
+    input.click();
+    setTimeout(() => input.removeAttribute('capture'), 1000);
+    return;
+  }
   const modes = { photo: ['photo'], video: ['video'], moment: ['photo', 'video'] }[draft.kind];
   const file = await openCamera({ modes, maxSeconds: MAX_VIDEO_SECONDS });
   if (file && draft && document.querySelector('.create')) handleFile(file);
@@ -895,6 +921,14 @@ actions['edit-profile'] = () => {
           <label class="field"><span>New password</span><input type="password" name="next" autocomplete="new-password" minlength="8"></label>
         </div>
       </details>
+      <details class="danger-zone">
+        <summary>Delete account</summary>
+        <div class="stack pad-top">
+          <p class="muted small">This erases your account and everything in it on this device: posts, moments, comments, goals, trophies and care needs. It cannot be undone.</p>
+          <button type="button" class="btn ghost danger" data-action="delete-account">${icon('trash')}Delete my account</button>
+        </div>
+      </details>
+      <p class="muted small"><a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy policy</a></p>
       <p class="form-error" role="alert"></p>
       <div class="row"><span class="spacer"></span><button type="button" class="btn ghost" data-action="close-dialog">Cancel</button><button class="btn primary">Save</button></div>
     </form>`;
@@ -905,6 +939,32 @@ actions['edit-profile'] = () => {
     if (f) d.querySelector('.avatar').innerHTML = `<img src="${URL.createObjectURL(f)}" alt="" class="pending">`;
   });
   d.showModal();
+};
+
+actions['delete-account'] = async el => {
+  if (!confirm(`Delete @${me.username} and everything in it? This cannot be undone.`)) return;
+  el.disabled = true;
+  const name = me.username;
+  const [posts, comments, goals] = await Promise.all([db.all('posts'), db.all('comments'), db.byIndex('goals', 'owner', name)]);
+  for (const p of posts) {
+    if (p.author === name) { await deletePost(p.id); continue; }
+    if (p.licks.includes(name)) { p.licks = p.licks.filter(u => u !== name); await db.put('posts', p); }
+  }
+  for (const c of comments.filter(c => c.author === name)) {
+    await db.del('comments', c.id);
+    const p = await db.get('posts', c.postId);
+    if (p) { p.barkCount = Math.max(0, (p.barkCount || 1) - 1); await db.put('posts', p); }
+  }
+  await Promise.all(goals.map(g => db.del('goals', g.id)));
+  await db.del('users', name);
+  el.closest('dialog')?.close();
+  auth.signOut();
+  me = null;
+  syncNativeCare();
+  applyTheme('clean');
+  history.replaceState(null, '', location.pathname);
+  renderAuth();
+  toast('Your account was deleted');
 };
 
 actions['close-dialog'] = el => el.closest('dialog')?.close();
@@ -1329,7 +1389,7 @@ async function viewCare(main) {
   const done = today.filter(n => n.doneAt).length;
   const pct = today.length ? Math.round(done / today.length * 100) : 100;
   const upcoming = upcomingCare();
-  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const perm = Native.on ? (nativeRemindersOn ? 'granted' : 'default') : 'Notification' in window ? Notification.permission : 'unsupported';
   main.innerHTML = `
     <section class="card care-head">
       <div class="row">
@@ -1348,7 +1408,9 @@ async function viewCare(main) {
         <button class="btn ghost sm daybloom-btn" data-action="care-daybloom">${icon('calendar')}Send to Daybloom</button>
         <button class="btn primary sm" data-action="care-new">${icon('plus')}New need</button>
       </div>
-      <p class="muted small care-note">Reminders pop up while PetPost is open. Send them to Daybloom to get them even when PetPost is closed.</p>
+      <p class="muted small care-note">${Native.on
+        ? 'Reminders go off on your iPhone at each time, even when PetPost is closed.'
+        : 'Reminders pop up while PetPost is open. Send them to Daybloom to get them even when PetPost is closed.'}</p>
     </section>
 
     <h2 class="section-title">Today</h2>
@@ -1385,6 +1447,7 @@ forms['care-setup'] = async (form, fd) => {
   if (!picks.length) return toast('Pick at least one, or tap Make my own.');
   me.care = picks.map(i => ({ id: db.uid(), ...ideas[i], note: '' }));
   await saveMe();
+  syncNativeCare(true);
   toast(`${picks.length} needs added`);
   route();
 };
@@ -1467,6 +1530,7 @@ forms['care-save'] = async (form, fd) => {
   if (i >= 0) me.care[i] = item; else me.care.push(item);
   await saveMe();
   form.closest('dialog').close();
+  syncNativeCare(true);
   toast(i >= 0 ? 'Need updated' : 'Need added');
   if (parts()[0] === 'care') viewCare(document.getElementById('view')); else go('#/care');
   updateCareBadge();
@@ -1477,11 +1541,29 @@ actions['care-delete'] = async el => {
   me.care = (me.care || []).filter(n => n.id !== el.dataset.id);
   await saveMe();
   el.closest('dialog').close();
+  syncNativeCare();
   toast('Need deleted');
   route();
 };
 
+// In the iPhone app every need is scheduled as a repeating phone notification.
+let nativeRemindersOn = false;
+function syncNativeCare(ask = false) {
+  if (!Native.on) return;
+  Native.send({ type: 'care', items: me ? me.care || [] : [], pet: me?.petName || 'Your pet', ask });
+}
+window.petpostNativeReminders = allowed => {
+  const changed = nativeRemindersOn !== allowed;
+  nativeRemindersOn = allowed;
+  if (changed && parts()[0] === 'care') viewCare(document.getElementById('view'));
+};
+
 actions['care-notify'] = async () => {
+  if (Native.on) {
+    syncNativeCare(true);
+    toast('If reminders stay off, turn on notifications for PetPost in the iPhone Settings app.');
+    return;
+  }
   const result = await Notification.requestPermission();
   toast(result === 'granted' ? 'Reminders on. They pop up while PetPost is open.' : 'Reminders were not allowed. You can still use Add to calendar.');
   if (parts()[0] === 'care') viewCare(document.getElementById('view'));
@@ -1524,13 +1606,13 @@ async function checkCareReminders() {
     const due = minutesOf(n.time);
     if (n.doneAt || remindedToday.has(key) || now < due || now - due > 30) continue;
     remindedToday.add(key);
-    const title = `Time for ${n.name.toLowerCase()}`;
+    const title = /time$/i.test(n.name) ? n.name : `Time for ${n.name.toLowerCase()}`;
     const body = `${me.petName || 'Your pet'} is counting on you${n.note ? ` · ${n.note}` : ''}`;
     toast(`${title}. ${body}`);
     if ('Notification' in window && Notification.permission === 'granted') {
       const reg = await navigator.serviceWorker?.getRegistration();
       const options = { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: key };
-      if (reg) reg.showNotification(title, options); else new Notification(title, options);
+      if (reg) reg.showNotification(title, options); else if (!Native.on) new Notification(title, options);
     }
   }
   updateCareBadge();
@@ -1577,7 +1659,7 @@ addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt
 addEventListener('appinstalled', () => { installPrompt = null; document.querySelector('.install-chip')?.remove(); toast('PetPost is on your home screen'); });
 
 function isInstalled() {
-  return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  return Native.on || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 }
 
 actions.install = async () => {
@@ -1615,7 +1697,8 @@ actions.install = async () => {
   applyTheme(me?.theme || 'clean');
   addEventListener('hashchange', route);
   route();
-  if ('serviceWorker' in navigator) setUpUpdates();
+  syncNativeCare();
+  if ('serviceWorker' in navigator && !Native.on) setUpUpdates();
 })();
 
 // ---------- automatic updates

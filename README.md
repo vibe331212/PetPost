@@ -11,3 +11,15 @@ python3 -m http.server 5173
 ```
 
 Then open http://localhost:5173.
+
+## iPhone app
+
+`ios/` holds an Xcode project that wraps the web app for the App Store, the same way Daybloom does.
+The web files are copied into the app when it builds and served from `petpost://app/`.
+In the app, care needs become real iPhone notifications, and Save and Share open the iPhone share sheet.
+
+Upload a build to App Store Connect (needs a paid Apple Developer account):
+
+```bash
+ios/upload-to-testflight.sh YOUR_TEAM_ID
+```
