@@ -836,7 +836,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
   } else {
     const list = tab === 'saved'
       ? (await Promise.all(me.saved.map(id => db.get('posts', id)))).filter(p => p && p.kind !== 'moment')
-      : posts;
+      : tab === 'videos' ? posts.filter(p => p.mediaType === 'video') : posts;
     content = list.length
       ? `<div class="grid">${list.map(p => `
           <a class="tile" href="#/post/${p.id}" aria-label="Open post">
@@ -844,7 +844,9 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
               ? `<video src="${blobURL(p.id, p.media)}#t=0.1" muted playsinline preload="metadata"></video><span class="tile-badge">${icon('play')}</span>`
               : `<img src="${blobURL(p.id, p.media)}" alt="" loading="lazy">`}
           </a>`).join('')}</div>`
-      : `<div class="card empty"><p class="muted">${tab === 'saved' ? 'Posts you save show up here.' : own ? 'You have not posted yet.' : 'No posts yet.'}</p></div>`;
+      : tab === 'videos'
+        ? `<div class="card empty">${icon('video', 'big')}<p class="muted">${own ? 'Videos you post show up here.' : 'No videos yet.'}</p>${own ? '<a class="btn primary" href="#/create">Post a video</a>' : ''}</div>`
+        : `<div class="card empty"><p class="muted">${tab === 'saved' ? 'Posts you save show up here.' : own ? 'You have not posted yet.' : 'No posts yet.'}</p></div>`;
   }
 
   const tabLink = (id, label) => `<a href="#/profile/${esc(u.username)}/${id}" class="${tab === id ? 'on' : ''}">${label}</a>`;
@@ -868,7 +870,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
           <button class="btn ghost" data-action="sign-out">${icon('logout')}Sign out</button>
         </div>` : ''}
     </section>
-    <nav class="tabs">${tabLink('posts', 'Posts')}${own ? tabLink('saved', 'Saved') : ''}${tabLink('goals', 'Goals')}${tabLink('trophies', 'Trophies')}</nav>
+    <nav class="tabs">${tabLink('posts', 'Posts')}${tabLink('videos', 'Videos')}${own ? tabLink('saved', 'Saved') : ''}${tabLink('goals', 'Goals')}${tabLink('trophies', 'Trophies')}</nav>
     <section class="tab-body">${content}</section>`;
 }
 

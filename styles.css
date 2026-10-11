@@ -330,8 +330,10 @@ body[data-tone="dark"] .chips.privacy .chip.plain { color: var(--muted); }
 .stats strong { font-size: 18px; }
 .stats span { font-size: 12px; color: var(--muted); }
 .profile-head .row { grid-column: 1 / -1; margin-top: 8px; }
-.tabs { display: flex; gap: 4px; padding: 4px; background: var(--surface); backdrop-filter: blur(16px); border: 1px solid var(--line); border-radius: 999px; margin-bottom: 16px; }
-.tabs a { flex: 1; text-align: center; padding: 9px; border-radius: 999px; font-weight: 600; color: var(--muted); }
+.tabs { display: flex; gap: 2px; padding: 4px; overflow-x: auto; scrollbar-width: none; background: var(--surface); backdrop-filter: blur(16px); border: 1px solid var(--line); border-radius: 999px; margin-bottom: 16px; }
+.tabs a { flex: 1 0 auto; text-align: center; padding: 9px 12px; border-radius: 999px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+@media (max-width: 420px) { .tabs a { font-size: 13.5px; padding: 9px 10px; } }
+.tabs::-webkit-scrollbar { display: none; }
 .tabs a.on { background: var(--accent); color: #fff; }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; border-radius: var(--radius); overflow: hidden; }
 .tile { position: relative; aspect-ratio: 1; background: #111; overflow: hidden; }
