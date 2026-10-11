@@ -323,7 +323,6 @@ function postCard(p, author) {
         ${own ? `<button class="icon-btn" data-action="delete-post" data-id="${p.id}" aria-label="Delete post">${icon('trash')}</button>` : ''}
       </header>
       <div class="media">${mediaEl(p)}<span class="lick-burst">${icon('lick')}</span></div>
-      ${privacyChips(p.report, true)}
       <div class="actions">
         <button class="act lick ${licked ? 'on' : ''}" data-action="lick" data-id="${p.id}" aria-pressed="${licked}">${icon('lick')}<span class="count">${n}</span><span class="lbl">${plural(n, 'Lick')}</span></button>
         <a class="act" href="#/post/${p.id}">${icon('bark')}<span class="count bark-count">${b}</span><span class="lbl">${countLabel(b, me.petType)}</span></a>
@@ -335,12 +334,6 @@ function postCard(p, author) {
       ${p.goalTitle ? `<a class="goal-tag" href="#/profile/${esc(p.author)}/goals">${icon('goal')}${esc(p.goalTitle)}</a>` : ''}
       ${p.caption ? `<p class="caption"><strong>${esc(author.displayName)}</strong> ${esc(p.caption)}</p>` : ''}
     </article>`;
-}
-
-function privacyChips(report, compact = false) {
-  const AUDIO = { removed: 'Sound removed', filtered: 'Voice filter on' };
-  if (!report || !AUDIO[report.audio]) return '';
-  return `<div class="chips privacy ${compact ? 'compact' : ''}"><span class="chip">${icon('mute')}${AUDIO[report.audio]}</span></div>`;
 }
 
 actions.lick = async el => {
@@ -606,30 +599,11 @@ const KIND_HINTS = {
   moment: 'A photo or short video that disappears after 24 hours.',
 };
 
-const OPTIONS = {
-  audio: {
-    label: 'Sound',
-    choices: [['keep', 'Keep'], ['filter', 'Voice filter'], ['remove', 'Remove']],
-    hints: {
-      remove: 'All sound is removed, so no voices can be heard.',
-      filter: 'Experimental. Turns voices down, but may muffle your pet too.',
-      keep: 'The original sound, including any voices.',
-    },
-  },
-};
-
-const optionGroup = group => `
-  <div class="opt-group" data-group="${group}">
-    <span class="opt-label">${OPTIONS[group].label}</span>
-    <div class="seg small">${OPTIONS[group].choices.map(([v, l]) => `<button type="button" data-action="opt" data-group="${group}" data-value="${v}">${l}</button>`).join('')}</div>
-    <p class="muted small opt-hint"></p>
-  </div>`;
-
 async function viewCreate(main, arg) {
   const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.completedAt);
   const goalId = arg?.startsWith('goal-') ? arg.slice(5) : '';
   const goal = goals.find(g => g.id === goalId);
-  draft = { kind: arg === 'moment' ? 'moment' : 'photo', audio: 'keep', file: null, result: null, busy: false, previewURL: null };
+  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null };
   main.innerHTML = `
     <section class="card create">
       <h1>New post</h1>
@@ -637,7 +611,6 @@ async function viewCreate(main, arg) {
         ${['photo', 'video', 'moment'].map(k => `<button type="button" data-action="kind" data-kind="${k}">${icon(k)}${cap(k)}</button>`).join('')}
       </div>
       <p class="muted kind-hint"></p>
-      <div class="opts">${optionGroup('audio')}</div>
       <div class="source">
         <button type="button" class="source-btn camera-btn" data-action="open-camera">
           ${icon('camera', 'big')}
@@ -684,24 +657,8 @@ function updateKindUI() {
   root.querySelectorAll('.kinds button').forEach(b => b.classList.toggle('on', b.dataset.kind === draft.kind));
   root.querySelector('.kind-hint').textContent = KIND_HINTS[draft.kind];
   root.querySelector('.file-input').accept = { photo: 'image/*', video: 'video/*', moment: 'image/*,video/*' }[draft.kind];
-  root.querySelector('.opt-group[data-group="audio"]').hidden = draft.kind === 'photo';
   root.querySelector('.camera-label').textContent = { photo: 'Take a photo', video: 'Record a video', moment: 'Open camera' }[draft.kind];
-  for (const group of Object.keys(OPTIONS)) {
-    root.querySelectorAll(`[data-action="opt"][data-group="${group}"]`).forEach(b => b.classList.toggle('on', b.dataset.value === draft[group]));
-    root.querySelector(`.opt-group[data-group="${group}"] .opt-hint`).textContent = OPTIONS[group].hints[draft[group]];
-  }
 }
-
-actions.opt = el => {
-  if (!draft) return;
-  if (draft.busy) return toast('Still working on it, hang on a moment.');
-  if (draft[el.dataset.group] === el.dataset.value) return;
-  draft[el.dataset.group] = el.dataset.value;
-  updateKindUI();
-  // Re-edit the same photo or video with the new choice.
-  const isVideo = draft.file?.type.startsWith('video/');
-  if (draft.file && isVideo) handleFile(draft.file);
-};
 
 actions['open-camera'] = async () => {
   if (!draft || draft.busy) return;
@@ -752,7 +709,6 @@ async function handleFile(file) {
   const stage = root.querySelector('.stage');
   root.querySelector('.source').hidden = true;
   root.querySelector('.publish').hidden = true;
-  root.querySelector('.opts').classList.add('locked');
   stage.innerHTML = `
     <div class="processing">
       ${icon('paw', 'big spin-soft')}
@@ -767,16 +723,14 @@ async function handleFile(file) {
     bar.classList.toggle('indeterminate', frac == null);
     bar.firstElementChild.style.width = frac == null ? '' : `${Math.round(frac * 100)}%`;
   };
-  const { audio } = draft;
 
   try {
     if (isImage) {
       set('Preparing your photo...', null, '');
       draft.result = await processPhoto(file);
     } else {
-      const msg = audio === 'keep' ? 'Preparing your video...' : audio === 'filter' ? 'Filtering voices...' : 'Removing sound...';
-      set(msg, audio === 'keep' ? null : 0, audio === 'keep' ? '' : 'This takes about as long as the video. Keep this tab open.');
-      draft.result = await processVideo(file, { audio, onProgress: f => set(msg, f) });
+      set('Preparing your video...', null, '');
+      draft.result = await processVideo(file);
     }
     if (!document.body.contains(stage)) return;
     showResult(root);
@@ -787,7 +741,6 @@ async function handleFile(file) {
     draft.file = null;
   } finally {
     draft.busy = false;
-    root.querySelector('.opts').classList.remove('locked');
   }
 }
 
@@ -798,7 +751,7 @@ function showResult(root) {
     <div class="preview">${r.type === 'video'
       ? `<video src="${draft.previewURL}" controls playsinline autoplay loop muted></video>`
       : `<img src="${draft.previewURL}" alt="Preview">`}</div>
-    ${privacyChips(r.report)}`;
+`;
   root.querySelector('.publish').hidden = false;
 }
 
@@ -986,11 +939,14 @@ function goalCard(g, own) {
         <span class="spacer"></span>${dueLabel(g)}
       </header>
       <div class="progress"><i style="width:${pct}%"></i></div>
-      <p class="muted small">${g.completedAt ? `Completed ${ago(g.completedAt)} ago`.replace('just now ago', 'just now') : total ? `${done} of ${total} steps · ${pct}%` : 'No steps added'}</p>
+      <p class="muted small">${g.completedAt ? `Completed ${ago(g.completedAt)} ago`.replace('just now ago', 'just now') : total ? `${done} of ${total} steps · ${pct}%` : 'No steps added'}${g.practice?.length ? ` · practiced ${g.practice.length} ${g.practice.length === 1 ? 'day' : 'days'}` : ''}</p>
       ${total ? `<ul class="steps">${g.steps.map((s, i) => `
         <li><label class="${s.done ? 'checked' : ''}"><input type="checkbox" ${s.done ? 'checked' : ''} ${editable ? '' : 'disabled'} data-action="goal-step" data-id="${g.id}" data-i="${i}"><span>${esc(s.text)}</span></label></li>`).join('')}</ul>` : ''}
       ${own ? `
         <div class="row wrap">
+          ${!g.completedAt ? (g.practice?.includes(dayKey())
+            ? `<button class="btn ghost sm practiced" data-action="goal-practice" data-id="${g.id}" aria-pressed="true">${icon('check')}Practiced today</button>`
+            : `<button class="btn ghost sm" data-action="goal-practice" data-id="${g.id}" aria-pressed="false">${icon('flame')}Practice today</button>`) : ''}
           ${!g.completedAt ? `<button class="btn primary sm" data-action="goal-complete" data-id="${g.id}">${icon('check')}Mark complete</button>` : ''}
           ${!g.completedAt ? `<a class="btn ghost sm" href="#/create/goal-${g.id}">${icon('video')}Post progress</a>` : ''}
           <span class="spacer"></span>
@@ -1018,6 +974,7 @@ async function viewGoals(main) {
         <p class="form-error" role="alert"></p>
       </form>
     </section>
+    <div class="streak-slot">${streakCard()}</div>
     ${active.length ? `<h2 class="section-title">In progress</h2>${active.map(g => goalCard(g, true)).join('')}` : ''}
     ${done.length ? `<h2 class="section-title">Completed</h2>${done.map(g => goalCard(g, true)).join('')}` : ''}
     ${!goals.length ? `<div class="card empty">${icon('goal', 'big')}<p class="muted">No goals yet. Tap a suggestion above to start.</p></div>` : ''}`;
@@ -1062,9 +1019,12 @@ actions['goal-step'] = async el => {
   const g = await db.get('goals', el.dataset.id);
   if (!g || g.completedAt) return;
   g.steps[+el.dataset.i].done = el.checked;
+  const newDay = el.checked && !g.practice?.includes(dayKey());
+  if (newDay) (g.practice ||= []).push(dayKey());
   await db.put('goals', g);
   await refreshGoal(g.id);
-  if (g.steps.every(s => s.done)) toast('Every step done. Mark the goal complete when you are ready.');
+  if (newDay) await recordPractice();
+  else if (g.steps.every(s => s.done)) toast('Every step done. Mark the goal complete when you are ready.');
 };
 
 actions['goal-complete'] = async el => {
@@ -1075,7 +1035,7 @@ actions['goal-complete'] = async el => {
   await db.put('goals', g);
   const trophy = awardTrophy(me, g);
   await saveMe();
-  const choice = await showTrophy({ headline: trophyHeadline(trophy, true), number: me.trophies.length, date: fmtDate(trophy.earnedAt) });
+  const choice = await showTrophy({ kicker: 'Goal complete', headline: trophyHeadline(trophy, true), number: me.trophies.length, date: fmtDate(trophy.earnedAt) });
   if (choice === 'trophies') go(`#/profile/${me.username}/trophies`);
   else route();
 };
@@ -1085,6 +1045,7 @@ const fmtDate = ts => new Date(ts).toLocaleDateString(undefined, { month: 'long'
 
 // "Teach Biscuit to sit" -> "You taught Biscuit to sit!"
 function trophyHeadline(t, own) {
+  if (t.kind === 'streak') return `${own ? 'You' : t.ownerName || 'They'} trained ${t.petName || 'your pet'} ${t.days} days in a row!`;
   const rest = t.title.replace(/^teach\s+/i, '');
   const said = rest === t.title ? `reached the goal "${t.title}"` : `taught ${rest}`;
   return `${own ? 'You' : t.ownerName || 'They'} ${said}!`;
@@ -1092,7 +1053,7 @@ function trophyHeadline(t, own) {
 
 function awardTrophy(user, goal) {
   user.trophies ||= [];
-  let t = user.trophies.find(x => x.goalId === goal.id);
+  let t = user.trophies.find(x => x.goalId && x.goalId === goal.id);
   if (!t) {
     t = { id: db.uid(), goalId: goal.id, title: goal.title, steps: goal.steps.length, earnedAt: goal.completedAt || Date.now() };
     user.trophies.push(t);
@@ -1102,17 +1063,116 @@ function awardTrophy(user, goal) {
 
 const TROPHY_TIERS = [['gold', 'Gold'], ['silver', 'Silver'], ['bronze', 'Bronze']];
 function trophyCard(t, i, own, u) {
-  const [tier, tierName] = TROPHY_TIERS[i % 3];
+  const [tier, tierName] = t.kind === 'streak' ? ['streak', `${t.days}-day streak`] : TROPHY_TIERS[i % 3];
   return `
     <article class="card trophy ${tier}">
-      <div class="trophy-icon">${icon('trophy')}</div>
+      <div class="trophy-icon">${icon(t.kind === 'streak' ? 'flame' : 'trophy')}</div>
       <div class="trophy-body">
         <span class="trophy-num">${tierName} · Trophy #${i + 1}</span>
         <h3>${esc(trophyHeadline({ ...t, ownerName: u.displayName }, own))}</h3>
-        <p class="muted small">Goal reached ${fmtDate(t.earnedAt)}${t.steps ? ` · ${t.steps} ${t.steps === 1 ? 'step' : 'steps'}` : ''}</p>
+        <p class="muted small">${t.kind === 'streak' ? 'Streak reached' : 'Goal reached'} ${fmtDate(t.earnedAt)}${t.steps ? ` · ${t.steps} ${t.steps === 1 ? 'step' : 'steps'}` : ''}</p>
       </div>
     </article>`;
 }
+
+// ---------- daily streaks
+// Practising any goal on a day keeps the streak going; skipping a whole day resets it.
+const STREAK_MILESTONES = [3, 7, 14, 30, 50, 100, 365];
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const shiftDay = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+function streakStats(days = []) {
+  const set = new Set(days);
+  const today = new Date();
+  let cursor = set.has(dayKey(today)) ? today : shiftDay(today, -1);
+  let current = 0;
+  while (set.has(dayKey(cursor))) { current++; cursor = shiftDay(cursor, -1); }
+  let best = 0, run = 0, prev = null;
+  for (const k of [...set].sort()) {
+    const d = new Date(`${k}T12:00:00`);
+    run = prev && dayKey(shiftDay(prev, 1)) === k ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = d;
+  }
+  return { current, best, today: set.has(dayKey(today)) };
+}
+
+function streakCard() {
+  const { current, best, today } = streakStats(me.practiceDays);
+  const next = STREAK_MILESTONES.find(m => m > current);
+  const week = Array.from({ length: 7 }, (_, i) => shiftDay(new Date(), i - 6));
+  const set = new Set(me.practiceDays || []);
+  const pet = esc(me.petName || 'your pet');
+  const message = today
+    ? `Done for today. Come back tomorrow to keep it going.`
+    : current
+      ? `Practice any goal today to keep your streak alive.`
+      : `Practice any goal with ${pet} today to start a streak.`;
+  return `
+    <section class="card streak-card ${current ? 'lit' : ''}">
+      <div class="streak-top">
+        <div class="streak-flame">${icon('flame')}</div>
+        <div class="streak-count"><strong>${current}</strong><span>${current === 1 ? 'day' : 'day'} streak</span></div>
+        <div class="streak-meta muted small">Best ${best} ${best === 1 ? 'day' : 'days'}${next ? `<br>Next trophy at ${next} days` : ''}</div>
+      </div>
+      <div class="week" aria-label="Last 7 days">
+        ${week.map(d => {
+          const k = dayKey(d), isToday = k === dayKey();
+          return `<span class="day ${set.has(k) ? 'on' : ''} ${isToday ? 'today' : ''}" title="${d.toLocaleDateString(undefined, { weekday: 'long' })}"><i>${set.has(k) ? icon('check') : ''}</i><small>${d.toLocaleDateString(undefined, { weekday: 'narrow' })}</small></span>`;
+        }).join('')}
+      </div>
+      <p class="muted small">${message}</p>
+    </section>`;
+}
+
+function refreshStreakCard() {
+  const slot = document.querySelector('.streak-slot');
+  if (slot) slot.innerHTML = streakCard();
+}
+
+// Adds today to the streak, then awards any streak trophy just reached.
+async function recordPractice() {
+  me.practiceDays ||= [];
+  if (!me.practiceDays.includes(dayKey())) me.practiceDays.push(dayKey());
+  const { current } = streakStats(me.practiceDays);
+  me.streakTrophies ||= [];
+  const reached = STREAK_MILESTONES.filter(m => m <= current && !me.streakTrophies.includes(m));
+  let trophy = null;
+  for (const m of reached) {
+    me.streakTrophies.push(m);
+    trophy = { id: db.uid(), kind: 'streak', days: m, petName: me.petName, title: `${m}-day streak`, earnedAt: Date.now() };
+    (me.trophies ||= []).push(trophy);
+  }
+  await saveMe();
+  refreshStreakCard();
+  if (trophy) {
+    const choice = await showTrophy({ badge: 'flame', kicker: `${trophy.days}-day streak`, headline: trophyHeadline(trophy, true), number: me.trophies.length, date: fmtDate(trophy.earnedAt) });
+    if (choice === 'trophies') go(`#/profile/${me.username}/trophies`);
+  } else {
+    toast(current === 1 ? 'Streak started. See you tomorrow!' : `${current}-day streak. Keep it up!`);
+  }
+}
+
+actions['goal-practice'] = async el => {
+  const g = await db.get('goals', el.dataset.id);
+  if (!g || g.completedAt) return;
+  g.practice ||= [];
+  const today = dayKey();
+  if (g.practice.includes(today)) {
+    // Undo: only drop today from the streak if no other goal was practised today.
+    g.practice = g.practice.filter(d => d !== today);
+    await db.put('goals', g);
+    const others = (await db.byIndex('goals', 'owner', me.username)).some(x => x.id !== g.id && x.practice?.includes(today));
+    if (!others) { me.practiceDays = (me.practiceDays || []).filter(d => d !== today); await saveMe(); }
+    await refreshGoal(g.id);
+    refreshStreakCard();
+    return;
+  }
+  g.practice.push(today);
+  await db.put('goals', g);
+  await refreshGoal(g.id);
+  await recordPractice();
+};
 
 actions['goal-delete'] = async el => {
   if (!confirm('Delete this goal?')) return;

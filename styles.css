@@ -252,20 +252,10 @@ body[data-tone="dark"] .chips.privacy .chip { color: #5fe39a; }
 .bark-form input { border-radius: 999px !important; }
 
 /* ---------- create */
-.opts { display: grid; gap: 14px; margin-bottom: 16px; }
-.opts.locked { opacity: .55; pointer-events: none; }
-.opt-group { display: flex; flex-direction: column; gap: 6px; }
-.opt-label { font-size: 13px; font-weight: 600; color: var(--muted); }
-.seg.small { margin: 0; }
-.seg.small button { height: 34px; font-size: 14px; }
-.opt-hint { min-height: 18px; }
 .chips.privacy .chip.plain { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
 body[data-tone="dark"] .chips.privacy .chip.plain { color: var(--muted); }
 .sound-hint { margin-top: -6px; }
 .kind-hint { margin-bottom: 14px; }
-.audio-opts { border: 0; padding: 0; margin: 0 0 16px; display: grid; gap: 8px; }
-.audio-opts[hidden] { display: none; }
-.audio-opts legend { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; padding: 0; }
 .radio {
   display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-sm);
   border: 1px solid var(--line); background: var(--surface-2); cursor: pointer;
@@ -470,3 +460,29 @@ button.mode-chip { cursor: pointer; color: var(--text); font: inherit; font-size
 .install-steps { margin: 0 0 20px; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; }
 @media (max-width: 420px) { .install-chip span { display: none; } .install-chip { padding: 8px 10px; } }
 @media (display-mode: standalone) { body { -webkit-user-select: none; user-select: none; } input, textarea { -webkit-user-select: text; user-select: text; } }
+
+/* ---------- daily streaks */
+.streak-card { display: flex; flex-direction: column; gap: 14px; }
+.streak-top { display: flex; align-items: center; gap: 14px; }
+.streak-flame { width: 54px; height: 54px; border-radius: 16px; display: grid; place-items: center; background: var(--surface-2); color: var(--muted); flex: none; }
+.streak-flame .ic { width: 30px; height: 30px; }
+.streak-card.lit .streak-flame { background: linear-gradient(160deg, #ffb547, #ff5a36); color: #fff; box-shadow: 0 6px 18px rgba(255, 90, 54, .35); }
+.streak-card.lit .streak-flame .ic { fill: rgba(255, 255, 255, .25); animation: flicker 2.4s ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes flicker { 50% { transform: scale(1.08) rotate(-3deg); } }
+.streak-count { display: flex; align-items: baseline; gap: 6px; flex: 1; }
+.streak-count strong { font-size: 34px; line-height: 1; letter-spacing: -0.03em; }
+.streak-count span { font-weight: 600; color: var(--muted); }
+.streak-meta { text-align: right; }
+.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 0 3px; }
+.day { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.day { min-width: 0; }
+.day i { width: 100%; max-width: 32px; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); }
+.day.on i { background: #ff7a3d; border-color: transparent; color: #fff; }
+.day.on i .ic { width: 16px; height: 16px; stroke-width: 2.6; }
+.day.today i { outline: 2px solid var(--accent); outline-offset: 2px; }
+.day small { font-size: 11px; color: var(--muted); font-weight: 600; }
+.btn.practiced { color: #e8590c; border-color: color-mix(in srgb, #ff7a3d 45%, transparent); background: color-mix(in srgb, #ff7a3d 12%, transparent); }
+.trophy.streak .trophy-icon { background: linear-gradient(160deg, #ffd08a, #ff5a36); color: #fff; }
+.trophy-burst.flame { background: radial-gradient(circle at 35% 30%, #ffe1b0, #ff8a3d 55%, #e8461c); color: #fff; box-shadow: 0 10px 30px rgba(232, 70, 28, .4); }
+.trophy-burst.flame .ic { fill: rgba(255,255,255,.3); }
+@media (max-width: 360px) { .mode-chip span { display: none; } .mode-chip { padding: 8px 10px; } .topbar .brand { padding-right: 12px; } }

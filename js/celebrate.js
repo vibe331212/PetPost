@@ -61,13 +61,13 @@ export function confetti({ count = 180, duration = 3500, parent = document.body 
  * Shows the trophy card. Resolves with 'trophies' if the person wants to see their trophies.
  * @param {{ headline: string, number: number, date: string }} trophy
  */
-export function showTrophy({ headline, number, date }) {
+export function showTrophy({ kicker = 'Goal complete', headline, number, date, badge = 'trophy' }) {
   return new Promise(resolve => {
     const d = document.createElement('dialog');
     d.className = 'modal trophy-modal';
     d.innerHTML = `
-      <div class="trophy-burst">${icon('trophy')}</div>
-      <p class="trophy-kicker">Goal complete</p>
+      <div class="trophy-burst ${badge}">${icon(badge)}</div>
+      <p class="trophy-kicker"></p>
       <h2 class="trophy-headline"></h2>
       <p class="muted">You earned trophy #${number} · ${date}</p>
       <div class="stack">
@@ -75,6 +75,7 @@ export function showTrophy({ headline, number, date }) {
         <button class="btn ghost block" data-choice="done">Done</button>
       </div>`;
     d.querySelector('.trophy-headline').textContent = headline;
+    d.querySelector('.trophy-kicker').textContent = kicker;
     document.body.append(d);
     let choice = 'done';
     d.addEventListener('click', e => {

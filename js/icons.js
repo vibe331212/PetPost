@@ -24,6 +24,7 @@ const PATHS = {
   camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>',
   flip: '<path d="M4 12a8 8 0 0 1 14-5.3M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-14 5.3M4 20v-4h4"/>',
   upload: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M5 20h14"/>',
+  flame: '<path d="M12 3c1 3.6 5.5 5.6 5.5 10.3a5.5 5.5 0 0 1-11 0c0-2.4 1.1-4 2.4-5.2.3 1.7 1.2 2.8 2.5 3.2C11 8.7 10.9 5.6 12 3z"/>',
   trophy: '<path d="M8 21h8M12 17v4M7 4h10v6a5 5 0 0 1-10 0z"/><path d="M7 6H4v1a4 4 0 0 0 3.5 4M17 6h3v1a4 4 0 0 1-3.5 4"/>',
   back: '<path d="M15 18l-6-6 6-6"/>',
   paw: '<g transform="translate(12 12) scale(0.55) translate(-32 -30.5)" stroke-width="3.3"><path d="M32 30 c-6 0-11 6-11 10.5 0 3 2.4 4.5 5.4 4.5 2.2 0 3.6-1 5.6-1s3.4 1 5.6 1c3 0 5.4-1.5 5.4-4.5C43 36 38 30 32 30z"/><circle cx="19" cy="27" r="3.4"/><circle cx="26.5" cy="19.5" r="3.4"/><circle cx="37.5" cy="19.5" r="3.4"/><circle cx="45" cy="27" r="3.4"/></g>',
