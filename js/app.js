@@ -1615,7 +1615,30 @@ actions.install = async () => {
   applyTheme(me?.theme || 'clean');
   addEventListener('hashchange', route);
   route();
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('Offline mode unavailable', err));
-  }
+  if ('serviceWorker' in navigator) setUpUpdates();
 })();
+
+// ---------- automatic updates
+// Checks for a new version on launch and whenever the app comes back to the front.
+// When one arrives it reloads, unless you are in the middle of something, then it offers a button.
+function setUpUpdates() {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const check = () => reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    setInterval(check, 30 * 60 * 1000);
+  }).catch(err => console.warn('Offline mode unavailable', err));
+
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return; // first install, nothing old to replace
+    const busy = draft?.file || draft?.busy || document.querySelector('dialog[open]') || viewer;
+    if (!busy) { reloading = true; location.reload(); return; }
+    if (document.querySelector('.update-bar')) return;
+    const bar = document.createElement('button');
+    bar.className = 'update-bar';
+    bar.innerHTML = `${icon('download')}<span>PetPost was updated. Tap to refresh.</span>`;
+    bar.onclick = () => location.reload();
+    document.body.append(bar);
+  });
+}
