@@ -1,6 +1,6 @@
 // Service worker: lets PetPost open and run without an internet connection.
 // Bump VERSION whenever app files change so phones pick up the update.
-const VERSION = 'petpost-v5';
+const VERSION = 'petpost-v6';
 const SHELL = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const SHELL = [
   './js/icons.js',
   './js/media.js',
   './js/sounds.js',
+  './js/stickers.js',
   './js/themes.js',
   './icons/icon.svg',
   './icons/icon-192.png',

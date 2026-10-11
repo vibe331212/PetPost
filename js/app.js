@@ -6,6 +6,7 @@ import { icon } from './icons.js';
 import { openCamera, cameraBlockedHelp } from './camera.js';
 import { soundFor, countLabel, PET_TYPES } from './sounds.js';
 import { showTrophy } from './celebrate.js';
+import { openStickerEditor } from './stickers.js';
 
 const $app = document.getElementById('app');
 const scene = new Scene(document.getElementById('scene'));
@@ -670,7 +671,7 @@ actions['open-camera'] = async () => {
 
 function resetDraft() {
   if (draft?.previewURL) URL.revokeObjectURL(draft.previewURL);
-  if (draft) { draft.result = null; draft.previewURL = null; draft.file = null; }
+  if (draft) { draft.result = null; draft.previewURL = null; draft.file = null; draft.baseBlob = null; draft.stickers = []; }
   const root = document.querySelector('.create');
   if (!root) return;
   root.querySelector('.stage').innerHTML = '';
@@ -705,6 +706,8 @@ async function handleFile(file) {
 
   draft.busy = true;
   draft.file = file;
+  draft.baseBlob = null;
+  draft.stickers = [];
   if (draft.previewURL) { URL.revokeObjectURL(draft.previewURL); draft.previewURL = null; }
   draft.result = null;
   const stage = root.querySelector('.stage');
@@ -747,14 +750,27 @@ async function handleFile(file) {
 
 function showResult(root) {
   const r = draft.result;
+  if (draft.previewURL) URL.revokeObjectURL(draft.previewURL);
   draft.previewURL = URL.createObjectURL(r.blob);
+  if (r.type === 'image' && !draft.baseBlob) { draft.baseBlob = r.blob; draft.stickers = []; }
+  const count = draft.stickers?.length || 0;
   root.querySelector('.stage').innerHTML = `
     <div class="preview">${r.type === 'video'
       ? `<video src="${draft.previewURL}" controls playsinline autoplay loop muted></video>`
       : `<img src="${draft.previewURL}" alt="Preview">`}</div>
-`;
+    ${r.type === 'image' ? `<button type="button" class="btn ghost sticker-btn" data-action="stickers">${icon('sparkle')}${count ? `Edit stickers (${count})` : 'Add stickers'}</button>` : ''}`;
   root.querySelector('.publish').hidden = false;
 }
+
+actions.stickers = async () => {
+  if (!draft?.baseBlob || draft.busy) return;
+  const out = await openStickerEditor(draft.baseBlob, draft.stickers, soundFor(me.petType).word);
+  if (!out || !draft) return;
+  draft.stickers = out.stickers;
+  draft.result = { ...draft.result, blob: out.blob };
+  const root = document.querySelector('.create');
+  if (root) showResult(root);
+};
 
 forms.publish = async (form, fd) => {
   if (!draft?.result || draft.busy) return;
