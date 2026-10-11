@@ -1,6 +1,6 @@
 // Service worker: lets PetPost open and run without an internet connection.
 // Bump VERSION whenever app files change so phones pick up the update.
-const VERSION = 'petpost-v1';
+const VERSION = 'petpost-v3';
 const SHELL = [
   './',
   './index.html',
@@ -15,13 +15,14 @@ const SHELL = [
   './js/media.js',
   './js/sounds.js',
   './js/themes.js',
+  './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(VERSION).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(VERSION).then(cache => cache.addAll(SHELL.map(url => new Request(url, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {
@@ -50,7 +51,7 @@ self.addEventListener('fetch', event => {
 
   // App files: use the network when online (so updates show up right away), the cache when offline.
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' }) // always ask the server if there is a newer version
       .then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
         return res;

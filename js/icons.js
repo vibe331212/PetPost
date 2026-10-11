@@ -26,7 +26,7 @@ const PATHS = {
   upload: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M5 20h14"/>',
   trophy: '<path d="M8 21h8M12 17v4M7 4h10v6a5 5 0 0 1-10 0z"/><path d="M7 6H4v1a4 4 0 0 0 3.5 4M17 6h3v1a4 4 0 0 1-3.5 4"/>',
   back: '<path d="M15 18l-6-6 6-6"/>',
-  paw: '<g fill="currentColor" stroke="none"><path d="M12 11.5c-3 0-6 3.4-6 6 0 1.7 1.3 2.5 3 2.5 1.2 0 2-.6 3-.6s1.8.6 3 .6c1.7 0 3-.8 3-2.5 0-2.6-3-6-6-6z"/><ellipse cx="5" cy="10" rx="2" ry="2.6"/><ellipse cx="9" cy="5.6" rx="2" ry="2.6"/><ellipse cx="15" cy="5.6" rx="2" ry="2.6"/><ellipse cx="19" cy="10" rx="2" ry="2.6"/></g>',
+  paw: '<g transform="translate(12 12) scale(0.55) translate(-32 -30.5)" stroke-width="3.3"><path d="M32 30 c-6 0-11 6-11 10.5 0 3 2.4 4.5 5.4 4.5 2.2 0 3.6-1 5.6-1s3.4 1 5.6 1c3 0 5.4-1.5 5.4-4.5C43 36 38 30 32 30z"/><circle cx="19" cy="27" r="3.4"/><circle cx="26.5" cy="19.5" r="3.4"/><circle cx="37.5" cy="19.5" r="3.4"/><circle cx="45" cy="27" r="3.4"/></g>',
 };
 
 export const icon = (name, cls = '') =>
