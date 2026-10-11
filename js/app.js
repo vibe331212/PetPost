@@ -1345,10 +1345,10 @@ async function viewCare(main) {
         ${perm === 'granted'
           ? `<span class="chip on">${icon('bell')}Reminders on</span>`
           : perm === 'unsupported' ? '' : `<button class="btn ghost sm" data-action="care-notify">${icon('bell')}Turn on reminders</button>`}
-        <button class="btn ghost sm" data-action="care-calendar">${icon('calendar')}Add to calendar</button>
+        <button class="btn ghost sm daybloom-btn" data-action="care-daybloom">${icon('calendar')}Send to Daybloom</button>
         <button class="btn primary sm" data-action="care-new">${icon('plus')}New need</button>
       </div>
-      <p class="muted small care-note">Reminders pop up while PetPost is open. Add them to your calendar to get them when it is closed too.</p>
+      <p class="muted small care-note">Reminders pop up while PetPost is open. Send them to Daybloom to get them even when PetPost is closed.</p>
     </section>
 
     <h2 class="section-title">Today</h2>
@@ -1487,24 +1487,31 @@ actions['care-notify'] = async () => {
   if (parts()[0] === 'care') viewCare(document.getElementById('view'));
 };
 
-// A calendar file with every need as a repeating event, each with its own alert.
-actions['care-calendar'] = () => {
-  const ics = s => String(s).replace(/[\\,;]/g, m => `\\${m}`).replace(/\n/g, '\\n');
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
-  const BYDAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
-  const events = (me.care || []).map(n => {
-    const start = n.repeat === 'once' || n.repeat === 'monthly' ? n.date : dayKey();
-    const dt = `${start.replace(/-/g, '')}T${n.time.replace(':', '')}00`;
-    const rule = n.repeat === 'daily' ? 'RRULE:FREQ=DAILY'
-      : n.repeat === 'weekly' ? `RRULE:FREQ=WEEKLY;BYDAY=${n.days.map(d => BYDAY[d]).join(',')}`
-      : n.repeat === 'monthly' ? `RRULE:FREQ=MONTHLY;BYMONTHDAY=${Number(n.date.slice(8))}` : '';
-    return ['BEGIN:VEVENT', `UID:${n.id}@petpost`, `DTSTAMP:${stamp}`, `DTSTART:${dt}`, 'DURATION:PT15M',
-      `SUMMARY:${ics(`${me.petName || 'Pet'}: ${n.name}`)}`, n.note ? `DESCRIPTION:${ics(n.note)}` : '', rule,
-      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${ics(n.name)}`, 'TRIGGER:PT0M', 'END:VALARM', 'END:VEVENT'].filter(Boolean).join('\r\n');
+// Sends every need to Daybloom (the schedule app) as events with reminders.
+// Daybloom repeats weekly events on one weekday, so a need on several days becomes one event per day.
+const DAYBLOOM_URL = 'https://vibe331212.github.io/daybloom/';
+const DAYBLOOM_COLORS = { food: '#f59e0b', walk: '#22c55e', water: '#3b82f6', meds: '#ec4899', groom: '#7c5cff', play: '#14b8a6', vet: '#ef4444', other: '#94a3b8' };
+
+function careForDaybloom() {
+  const pet = me.petName || 'Pet', today = dayKey();
+  const nextWeekday = wd => { const d = new Date(); d.setDate(d.getDate() + ((wd - d.getDay() + 7) % 7)); return dayKey(d); };
+  return (me.care || []).flatMap(n => {
+    const base = { title: `${pet}: ${n.name}`, time: n.time, remind: '0', private: true,
+      color: DAYBLOOM_COLORS[n.kind] || DAYBLOOM_COLORS.other, notes: [n.note, 'Added from PetPost'].filter(Boolean).join('\n') };
+    if (n.repeat === 'daily') return [{ ...base, date: today, repeat: 'daily' }];
+    if (n.repeat === 'weekly') return (n.days || []).map(d => ({ ...base, date: nextWeekday(d), repeat: 'weekly' }));
+    if (n.repeat === 'monthly') return [{ ...base, date: n.date, repeat: 'monthly' }];
+    return n.date >= today ? [{ ...base, date: n.date, repeat: 'none' }] : [];
   });
-  const file = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//PetPost//Care//EN', `X-WR-CALNAME:${ics(`${me.petName || 'Pet'} care`)}`, ...events, 'END:VCALENDAR'].join('\r\n');
-  downloadBlob(new Blob([file], { type: 'text/calendar' }), `${(me.petName || 'pet').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-care.ics`);
-  toast('Open the downloaded file to add the reminders to your calendar.');
+}
+
+actions['care-daybloom'] = () => {
+  const events = careForDaybloom();
+  if (!events.length) return toast('Add a need first, then send it to Daybloom.');
+  const json = JSON.stringify({ from: 'PetPost', events });
+  const payload = btoa(unescape(encodeURIComponent(json))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  window.open(`${DAYBLOOM_URL}?import=${payload}`, '_blank', 'noopener');
+  toast(`Opening Daybloom with ${events.length} ${events.length === 1 ? 'event' : 'events'}`);
 };
 
 // While the app is open, check every 30 seconds for needs that just came due.
