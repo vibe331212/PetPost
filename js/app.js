@@ -126,13 +126,14 @@ async function route() {
   if (!me) return renderAuth();
   if (!me.cameraAsked) return renderPermission();
   const [view = 'feed', a, b] = parts();
-  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes };
+  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare };
   const fn = views[view] || viewFeed;
   if (draft && view !== 'create') resetDraft();
   shell(views[view] ? view : 'feed', a);
   const main = document.getElementById('view');
   try {
     await fn(main, a, b);
+    updateCareBadge();
   } catch (err) {
     console.error(err);
     main.innerHTML = `<div class="card empty"><p>Something went wrong: ${esc(err.message)}</p></div>`;
@@ -156,7 +157,7 @@ function shell(active, arg) {
       ${tab('feed', 'home', 'Home', '#/feed')}
       ${tab('goals', 'goal', 'Goals', '#/goals')}
       ${tab('create', 'plus', 'Post', '#/create')}
-      ${tab('modes', 'mode', 'Modes', '#/modes')}
+      ${tab('care', 'care', 'Care', '#/care')}
       ${tab('profile', 'user', 'Profile', `#/profile/${me.username}`, active === 'profile' && (!arg || arg === me.username))}
     </nav>`;
 }
@@ -1180,6 +1181,344 @@ actions['goal-delete'] = async el => {
   el.closest('.goal').remove();
   toast('Goal deleted');
 };
+
+// ---------- pet care
+// Needs repeat daily, on chosen weekdays, monthly, or happen once (like a vet visit).
+// Done marks are kept per day in me.careLog = { 'YYYY-MM-DD': { needId: doneAt } }.
+const CARE_KINDS = {
+  food: ['bowl', 'Food'], walk: ['paw', 'Walk'], water: ['drop', 'Water'], meds: ['pill', 'Medicine'],
+  groom: ['brush', 'Grooming'], play: ['ball', 'Play'], vet: ['vet', 'Vet'], other: ['bell', 'Other'],
+};
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const need = (name, kind, time, repeat = 'daily', extra = {}) => ({ name, kind, time, repeat, ...extra });
+
+function careTemplates(petType) {
+  const t = String(petType || '').toLowerCase();
+  if (/dog|pupp/.test(t)) return [
+    need('Breakfast', 'food', '07:30'), need('Morning walk', 'walk', '08:00'), need('Fresh water', 'water', '09:00'),
+    need('Dinner', 'food', '18:00'), need('Evening walk', 'walk', '19:00'),
+    need('Brush coat', 'groom', '17:00', 'weekly', { days: [6] }), need('Flea and tick medicine', 'meds', '09:00', 'monthly', { date: dayKey() }),
+  ];
+  if (/cat|kitten/.test(t)) return [
+    need('Breakfast', 'food', '07:30'), need('Fresh water', 'water', '09:00'), need('Dinner', 'food', '18:00'),
+    need('Play time', 'play', '19:00'), need('Clean litter box', 'other', '20:00'),
+    need('Brush coat', 'groom', '17:00', 'weekly', { days: [0] }), need('Flea medicine', 'meds', '09:00', 'monthly', { date: dayKey() }),
+  ];
+  if (/horse|pony|donkey/.test(t)) return [
+    need('Morning hay', 'food', '07:00'), need('Fill water trough', 'water', '07:30'), need('Turnout', 'walk', '09:00'),
+    need('Evening feed', 'food', '17:30'), need('Pick hooves', 'groom', '18:00'), need('Muck out stall', 'other', '18:30'),
+  ];
+  if (/fish/.test(t)) return [
+    need('Morning feeding', 'food', '08:00'), need('Evening feeding', 'food', '18:00'),
+    need('Check water temperature', 'water', '09:00'), need('Partial water change', 'water', '10:00', 'weekly', { days: [6] }),
+  ];
+  return [
+    need('Morning feeding', 'food', '08:00'), need('Fresh water', 'water', '09:00'), need('Play time', 'play', '17:00'),
+    need('Evening feeding', 'food', '18:00'), need('Clean the habitat', 'other', '10:00', 'weekly', { days: [6] }),
+  ];
+}
+
+function occursOn(n, date) {
+  if (n.repeat === 'daily') return true;
+  if (n.repeat === 'weekly') return (n.days || []).includes(date.getDay());
+  if (n.repeat === 'once') return n.date === dayKey(date);
+  if (n.repeat === 'monthly') {
+    const want = Number((n.date || dayKey()).slice(8));
+    const last = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    return date.getDate() === Math.min(want, last);
+  }
+  return false;
+}
+
+const fmtTime = hhmm => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+};
+const minutesOf = hhmm => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
+const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+
+function scheduleText(n) {
+  const at = fmtTime(n.time);
+  if (n.repeat === 'daily') return `Every day at ${at}`;
+  if (n.repeat === 'weekly') {
+    const days = [...(n.days || [])].sort();
+    return `${days.length === 7 ? 'Every day' : days.map(d => WEEKDAYS[d]).join(', ')} at ${at}`;
+  }
+  if (n.repeat === 'monthly') return `Monthly on day ${Number(n.date.slice(8))} at ${at}`;
+  return `${new Date(`${n.date}T12:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} at ${at}`;
+}
+
+function todaysCare() {
+  const today = new Date(), log = me.careLog?.[dayKey(today)] || {};
+  return (me.care || []).filter(n => occursOn(n, today))
+    .sort((a, b) => minutesOf(a.time) - minutesOf(b.time))
+    .map(n => ({ ...n, doneAt: log[n.id] || null, overdue: !log[n.id] && minutesOf(n.time) < nowMinutes() }));
+}
+
+function upcomingCare(days = 14) {
+  const out = [];
+  for (let i = 1; i <= days; i++) {
+    const d = shiftDay(new Date(), i);
+    for (const n of me.care || []) if (n.repeat === 'once' || n.repeat === 'monthly') if (occursOn(n, d)) out.push({ n, d });
+  }
+  return out;
+}
+
+function careRow(n) {
+  const [ic] = CARE_KINDS[n.kind] || CARE_KINDS.other;
+  const state = n.doneAt ? 'done' : n.overdue ? 'overdue' : '';
+  return `
+    <li class="care-row ${state}" data-need="${n.id}">
+      <button class="care-check" data-action="care-toggle" data-id="${n.id}" aria-pressed="${!!n.doneAt}" aria-label="${n.doneAt ? 'Mark not done' : 'Mark done'}: ${esc(n.name)}">${n.doneAt ? icon('check') : ''}</button>
+      <span class="care-ic ${n.kind}">${icon(ic)}</span>
+      <div class="care-text">
+        <strong>${esc(n.name)}</strong>
+        <span class="muted small">${fmtTime(n.time)}${n.doneAt || n.overdue ? ` · <span class="care-tag">${n.doneAt ? `done ${new Date(n.doneAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : 'overdue'}</span>` : ''}${n.note ? ` · ${esc(n.note)}` : ''}</span>
+      </div>
+    </li>`;
+}
+
+async function viewCare(main) {
+  const pet = esc(me.petName || 'your pet');
+  const items = me.care || [];
+  if (!items.length) {
+    const ideas = careTemplates(me.petType);
+    main.innerHTML = `
+      <section class="card care-setup">
+        <div class="care-hero">${icon('care', 'big')}</div>
+        <h1>Set up ${pet}'s needs</h1>
+        <p class="muted">Pick what ${pet} needs and when. PetPost makes a checklist for each day and reminds you when it is time.</p>
+        <form data-form="care-setup" class="stack">
+          <ul class="care-pick">
+            ${ideas.map((n, i) => `
+              <li><label>
+                <input type="checkbox" name="pick" value="${i}" checked>
+                <span class="care-ic ${n.kind}">${icon(CARE_KINDS[n.kind][0])}</span>
+                <span class="care-text"><strong>${esc(n.name)}</strong><span class="muted small">${scheduleText(n)}</span></span>
+              </label></li>`).join('')}
+          </ul>
+          <p class="muted small">You can change the times and add more afterwards.</p>
+          <div class="row wrap">
+            <button class="btn primary">${icon('check')}Add these needs</button>
+            <button type="button" class="btn ghost" data-action="care-new">${icon('plus')}Make my own</button>
+          </div>
+        </form>
+      </section>`;
+    return;
+  }
+
+  const today = todaysCare();
+  const done = today.filter(n => n.doneAt).length;
+  const pct = today.length ? Math.round(done / today.length * 100) : 100;
+  const upcoming = upcomingCare();
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  main.innerHTML = `
+    <section class="card care-head">
+      <div class="row">
+        <div>
+          <h1>${pet}'s care</h1>
+          <p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+        </div>
+        <span class="spacer"></span>
+        <div class="ring" style="--pct:${pct}"><span>${done}/${today.length}</span></div>
+      </div>
+      <p class="care-summary">${!today.length ? `Nothing scheduled for today.` : done === today.length ? `All done for today. ${pet} is well looked after.` : `${today.length - done} left today${today.some(n => n.overdue) ? `, ${today.filter(n => n.overdue).length} overdue` : ''}.`}</p>
+      <div class="row wrap">
+        ${perm === 'granted'
+          ? `<span class="chip on">${icon('bell')}Reminders on</span>`
+          : perm === 'unsupported' ? '' : `<button class="btn ghost sm" data-action="care-notify">${icon('bell')}Turn on reminders</button>`}
+        <button class="btn ghost sm" data-action="care-calendar">${icon('calendar')}Add to calendar</button>
+        <button class="btn primary sm" data-action="care-new">${icon('plus')}New need</button>
+      </div>
+      <p class="muted small care-note">Reminders pop up while PetPost is open. Add them to your calendar to get them when it is closed too.</p>
+    </section>
+
+    <h2 class="section-title">Today</h2>
+    <section class="card care-list-card">
+      ${today.length ? `<ul class="care-list">${today.map(careRow).join('')}</ul>` : `<p class="muted">No needs scheduled for today.</p>`}
+    </section>
+
+    ${upcoming.length ? `
+      <h2 class="section-title">Coming up</h2>
+      <section class="card care-list-card">
+        <ul class="care-list">${upcoming.slice(0, 6).map(({ n, d }) => `
+          <li class="care-row">
+            <span class="care-ic ${n.kind}">${icon(CARE_KINDS[n.kind][0])}</span>
+            <div class="care-text"><strong>${esc(n.name)}</strong><span class="muted small">${d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} at ${fmtTime(n.time)}</span></div>
+          </li>`).join('')}</ul>
+      </section>` : ''}
+
+    <h2 class="section-title">All of ${pet}'s needs</h2>
+    <section class="card care-list-card">
+      <ul class="care-list">
+        ${[...items].sort((a, b) => minutesOf(a.time) - minutesOf(b.time)).map(n => `
+          <li class="care-row">
+            <span class="care-ic ${n.kind}">${icon(CARE_KINDS[n.kind][0])}</span>
+            <div class="care-text"><strong>${esc(n.name)}</strong><span class="muted small">${scheduleText(n)}${n.note ? ` · ${esc(n.note)}` : ''}</span></div>
+            <button class="icon-btn" data-action="care-edit" data-id="${n.id}" aria-label="Edit ${esc(n.name)}">${icon('edit')}</button>
+          </li>`).join('')}
+      </ul>
+    </section>`;
+}
+
+forms['care-setup'] = async (form, fd) => {
+  const ideas = careTemplates(me.petType);
+  const picks = fd.getAll('pick').map(Number);
+  if (!picks.length) return toast('Pick at least one, or tap Make my own.');
+  me.care = picks.map(i => ({ id: db.uid(), ...ideas[i], note: '' }));
+  await saveMe();
+  toast(`${picks.length} needs added`);
+  route();
+};
+
+actions['care-toggle'] = async el => {
+  const key = dayKey();
+  me.careLog ||= {};
+  const log = (me.careLog[key] ||= {});
+  if (log[el.dataset.id]) delete log[el.dataset.id];
+  else log[el.dataset.id] = Date.now();
+  // Keep about two months of history.
+  for (const k of Object.keys(me.careLog)) if (k < dayKey(shiftDay(new Date(), -60))) delete me.careLog[k];
+  await saveMe();
+  const all = todaysCare();
+  if (log[el.dataset.id] && all.every(n => n.doneAt)) toast(`All done for today. ${me.petName || 'Your pet'} says thanks!`);
+  viewCare(document.getElementById('view'));
+  updateCareBadge();
+};
+
+function careDialog(n) {
+  const editing = !!n;
+  n ||= { name: '', kind: 'food', time: '08:00', repeat: 'daily', days: [], date: dayKey(), note: '' };
+  const d = document.createElement('dialog');
+  d.className = 'modal care-modal';
+  d.innerHTML = `
+    <form data-form="care-save" class="stack" data-id="${editing ? n.id : ''}" novalidate>
+      <header class="row"><h2>${editing ? 'Edit need' : 'New need'}</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
+      <label class="field"><span>What does ${esc(me.petName || 'your pet')} need?</span><input name="name" maxlength="50" value="${esc(n.name)}" placeholder="Breakfast, evening walk, vet checkup"></label>
+      <div class="field"><span>Type</span>
+        <div class="chips">${Object.entries(CARE_KINDS).map(([k, [ic, label]]) => `
+          <label class="chip pick-radio"><input type="radio" name="kind" value="${k}" ${n.kind === k ? 'checked' : ''}>${icon(ic)}${label}</label>`).join('')}</div>
+      </div>
+      <div class="two">
+        <label class="field"><span>Time</span><input type="time" name="time" value="${n.time}"></label>
+        <label class="field"><span>Repeats</span>
+          <select name="repeat">
+            ${[['daily', 'Every day'], ['weekly', 'On certain days'], ['monthly', 'Once a month'], ['once', 'Just once']].map(([v, l]) => `<option value="${v}" ${n.repeat === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="field care-days" ${n.repeat === 'weekly' ? '' : 'hidden'}><span>Which days?</span>
+        <div class="chips">${WEEKDAYS.map((w, i) => `<label class="chip pick-radio"><input type="checkbox" name="days" value="${i}" ${(n.days || []).includes(i) ? 'checked' : ''}>${w}</label>`).join('')}</div>
+      </div>
+      <label class="field care-date" ${n.repeat === 'monthly' || n.repeat === 'once' ? '' : 'hidden'}><span class="care-date-label">${n.repeat === 'once' ? 'Date' : 'Starting on (repeats on this day each month)'}</span><input type="date" name="date" value="${n.date || dayKey()}"></label>
+      <label class="field"><span>Note <small class="muted">optional</small></span><input name="note" maxlength="80" value="${esc(n.note || '')}" placeholder="1 cup of kibble, half a pill"></label>
+      <p class="form-error" role="alert"></p>
+      <div class="row">
+        ${editing ? `<button type="button" class="btn ghost danger" data-action="care-delete" data-id="${n.id}">${icon('trash')}Delete</button>` : ''}
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" data-action="close-dialog">Cancel</button>
+        <button class="btn primary">Save</button>
+      </div>
+    </form>`;
+  document.body.append(d);
+  const repeat = d.querySelector('select[name="repeat"]');
+  repeat.addEventListener('change', () => {
+    d.querySelector('.care-days').hidden = repeat.value !== 'weekly';
+    d.querySelector('.care-date').hidden = !['monthly', 'once'].includes(repeat.value);
+    d.querySelector('.care-date-label').textContent = repeat.value === 'once' ? 'Date' : 'Starting on (repeats on this day each month)';
+  });
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+}
+
+actions['care-new'] = () => careDialog(null);
+actions['care-edit'] = el => careDialog((me.care || []).find(n => n.id === el.dataset.id));
+
+forms['care-save'] = async (form, fd) => {
+  const name = String(fd.get('name') || '').trim();
+  const repeat = fd.get('repeat');
+  const days = fd.getAll('days').map(Number);
+  const time = fd.get('time');
+  if (!name) return formError(form, 'Give this need a name, like "Breakfast".');
+  if (!time) return formError(form, 'Choose a time.');
+  if (repeat === 'weekly' && !days.length) return formError(form, 'Pick at least one day.');
+  if ((repeat === 'once' || repeat === 'monthly') && !fd.get('date')) return formError(form, 'Choose a date.');
+  const item = { id: form.dataset.id || db.uid(), name, kind: fd.get('kind') || 'other', time, repeat, days, date: fd.get('date') || dayKey(), note: String(fd.get('note') || '').trim() };
+  me.care ||= [];
+  const i = me.care.findIndex(n => n.id === item.id);
+  if (i >= 0) me.care[i] = item; else me.care.push(item);
+  await saveMe();
+  form.closest('dialog').close();
+  toast(i >= 0 ? 'Need updated' : 'Need added');
+  if (parts()[0] === 'care') viewCare(document.getElementById('view')); else go('#/care');
+  updateCareBadge();
+};
+
+actions['care-delete'] = async el => {
+  if (!confirm('Delete this need?')) return;
+  me.care = (me.care || []).filter(n => n.id !== el.dataset.id);
+  await saveMe();
+  el.closest('dialog').close();
+  toast('Need deleted');
+  route();
+};
+
+actions['care-notify'] = async () => {
+  const result = await Notification.requestPermission();
+  toast(result === 'granted' ? 'Reminders on. They pop up while PetPost is open.' : 'Reminders were not allowed. You can still use Add to calendar.');
+  if (parts()[0] === 'care') viewCare(document.getElementById('view'));
+};
+
+// A calendar file with every need as a repeating event, each with its own alert.
+actions['care-calendar'] = () => {
+  const ics = s => String(s).replace(/[\\,;]/g, m => `\\${m}`).replace(/\n/g, '\\n');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const BYDAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  const events = (me.care || []).map(n => {
+    const start = n.repeat === 'once' || n.repeat === 'monthly' ? n.date : dayKey();
+    const dt = `${start.replace(/-/g, '')}T${n.time.replace(':', '')}00`;
+    const rule = n.repeat === 'daily' ? 'RRULE:FREQ=DAILY'
+      : n.repeat === 'weekly' ? `RRULE:FREQ=WEEKLY;BYDAY=${n.days.map(d => BYDAY[d]).join(',')}`
+      : n.repeat === 'monthly' ? `RRULE:FREQ=MONTHLY;BYMONTHDAY=${Number(n.date.slice(8))}` : '';
+    return ['BEGIN:VEVENT', `UID:${n.id}@petpost`, `DTSTAMP:${stamp}`, `DTSTART:${dt}`, 'DURATION:PT15M',
+      `SUMMARY:${ics(`${me.petName || 'Pet'}: ${n.name}`)}`, n.note ? `DESCRIPTION:${ics(n.note)}` : '', rule,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${ics(n.name)}`, 'TRIGGER:PT0M', 'END:VALARM', 'END:VEVENT'].filter(Boolean).join('\r\n');
+  });
+  const file = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//PetPost//Care//EN', `X-WR-CALNAME:${ics(`${me.petName || 'Pet'} care`)}`, ...events, 'END:VCALENDAR'].join('\r\n');
+  downloadBlob(new Blob([file], { type: 'text/calendar' }), `${(me.petName || 'pet').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-care.ics`);
+  toast('Open the downloaded file to add the reminders to your calendar.');
+};
+
+// While the app is open, check every 30 seconds for needs that just came due.
+const remindedToday = new Set();
+async function checkCareReminders() {
+  if (!me?.care?.length) return;
+  const now = nowMinutes();
+  for (const n of todaysCare()) {
+    const key = `${dayKey()}:${n.id}`;
+    const due = minutesOf(n.time);
+    if (n.doneAt || remindedToday.has(key) || now < due || now - due > 30) continue;
+    remindedToday.add(key);
+    const title = `Time for ${n.name.toLowerCase()}`;
+    const body = `${me.petName || 'Your pet'} is counting on you${n.note ? ` · ${n.note}` : ''}`;
+    toast(`${title}. ${body}`);
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      const options = { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: key };
+      if (reg) reg.showNotification(title, options); else new Notification(title, options);
+    }
+  }
+  updateCareBadge();
+}
+setInterval(checkCareReminders, 30000);
+
+function updateCareBadge() {
+  const item = document.querySelector('.nav-item[href="#/care"]');
+  if (!item || !me) return;
+  const overdue = todaysCare().filter(n => n.overdue).length;
+  item.classList.toggle('has-badge', overdue > 0);
+  item.dataset.badge = overdue || '';
+}
 
 // ---------- modes
 function viewModes(main) {

@@ -486,3 +486,44 @@ button.mode-chip { cursor: pointer; color: var(--text); font: inherit; font-size
 .trophy-burst.flame { background: radial-gradient(circle at 35% 30%, #ffe1b0, #ff8a3d 55%, #e8461c); color: #fff; box-shadow: 0 10px 30px rgba(232, 70, 28, .4); }
 .trophy-burst.flame .ic { fill: rgba(255,255,255,.3); }
 @media (max-width: 360px) { .mode-chip span { display: none; } .mode-chip { padding: 8px 10px; } .topbar .brand { padding-right: 12px; } }
+
+/* ---------- pet care */
+.care-setup h1 { margin-top: 6px; }
+.care-hero { width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.care-pick { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.care-pick label { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; }
+.care-pick label:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.care-pick input { accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+.care-head h1 { margin: 0; }
+.care-summary { margin: 12px 0 14px; font-weight: 500; }
+.care-note { margin-top: 10px; }
+.ring { --pct: 0; width: 62px; height: 62px; border-radius: 50%; flex: none; display: grid; place-items: center; background: conic-gradient(var(--accent) calc(var(--pct) * 1%), var(--surface-2) 0); }
+.ring span { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-solid); font-weight: 700; font-size: 14px; }
+.care-list-card { padding: 6px 8px; }
+.care-list-card > p { padding: 12px; }
+.care-list { list-style: none; margin: 0; padding: 0; }
+.care-row { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 12px; }
+.care-row + .care-row { border-top: 1px solid var(--line); }
+.care-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.care-text strong { overflow-wrap: anywhere; line-height: 1.3; }
+.care-ic { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--surface-2); }
+.care-ic .ic { width: 20px; height: 20px; }
+.care-ic.food { background: #fff1db; color: #b25e00; } .care-ic.walk { background: #e3f6e8; color: #1f8a4c; }
+.care-ic.water { background: #e2f1fd; color: #1769aa; } .care-ic.meds { background: #fde7ee; color: #c2255c; }
+.care-ic.groom { background: #efe8fd; color: #6741d9; } .care-ic.play { background: #fff3c4; color: #a26a00; }
+.care-ic.vet { background: #ffe3e0; color: #c92a2a; } .care-ic.other { background: var(--surface-2); color: var(--muted); }
+.care-check { width: 30px; height: 30px; border-radius: 50%; flex: none; border: 2px solid var(--line); background: var(--surface-solid); display: grid; place-items: center; cursor: pointer; color: #fff; padding: 0; }
+.care-check:hover { border-color: var(--accent); }
+.care-check .ic { width: 16px; height: 16px; stroke-width: 2.8; }
+.care-row.done .care-check { background: #2fbf71; border-color: #2fbf71; }
+.care-row.done strong { color: var(--muted); text-decoration: line-through; }
+.care-tag { font-weight: 600; white-space: nowrap; }
+.care-row.overdue .care-tag { color: #e5484d; }
+.care-row.overdue .care-check { border-color: #e5484d; }
+.chip.pick-radio { cursor: pointer; }
+.chip.pick-radio input { position: absolute; opacity: 0; pointer-events: none; }
+.chip.pick-radio:has(input:checked) { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chip.pick-radio:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.danger { color: #e5484d; }
+.nav-item { position: relative; }
+.nav-item.has-badge::after { content: attr(data-badge); position: absolute; top: 2px; right: calc(50% - 20px); min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #e5484d; color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
