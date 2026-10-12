@@ -8,7 +8,7 @@ import { openCamera, cameraBlockedHelp } from './camera.js';
 import { soundFor, countLabel, PET_TYPES } from './sounds.js';
 import { showTrophy } from './celebrate.js';
 import { openStickerEditor } from './stickers.js';
-import { ageText, trickName, cardImage } from './petcard.js';
+import { ageText, trickName, cardImage, goalImage } from './petcard.js';
 
 const $app = document.getElementById('app');
 const scene = new Scene(document.getElementById('scene'));
@@ -1425,7 +1425,7 @@ function goalCard(g, own) {
             ? `<button class="btn ghost sm practiced" data-action="goal-practice" data-id="${g.id}" aria-pressed="true">${icon('check')}Practiced today</button>`
             : `<button class="btn ghost sm" data-action="goal-practice" data-id="${g.id}" aria-pressed="false">${icon('flame')}Practice today</button>`) : ''}
           ${!g.completedAt ? `<button class="btn primary sm" data-action="goal-complete" data-id="${g.id}">${icon('check')}Mark complete</button>` : ''}
-          ${!g.completedAt ? `<a class="btn ghost sm" href="#/create/goal-${g.id}">${icon('video')}Post progress</a>` : ''}
+          <button class="btn ghost sm" data-action="goal-share" data-id="${g.id}">${icon('share')}${g.completedAt ? 'Share it' : 'Post progress'}</button>
           <span class="spacer"></span>
           <button class="icon-btn" data-action="goal-delete" data-id="${g.id}" aria-label="Delete goal">${icon('trash')}</button>
         </div>` : ''}
@@ -1649,6 +1649,37 @@ actions['goal-practice'] = async el => {
   await db.put('goals', g);
   await refreshGoal(g.id);
   await recordPractice();
+};
+
+// One tap: make a picture of the goal's progress and post it to your profile.
+actions['goal-share'] = async el => {
+  const g = await db.get('goals', el.dataset.id);
+  if (!g || el.disabled) return;
+  el.disabled = true;
+  const label = el.innerHTML;
+  el.textContent = 'Posting...';
+  try {
+    const total = g.steps.length, done = g.steps.filter(s => s.done).length;
+    const pct = g.completedAt ? 100 : total ? Math.round(done / total * 100) : 0;
+    const blob = await goalImage({
+      petName: me.petName, avatar: me.avatar, title: g.title, steps: g.steps, pct, done: !!g.completedAt,
+      streak: streakStats(me.practiceDays).current, owner: me.username,
+      accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#3b5bfd',
+    });
+    const caption = g.completedAt
+      ? `Goal complete: ${g.title}!`
+      : `Working on: ${g.title}${total ? ` \u00b7 ${done} of ${total} steps` : ''}`;
+    await db.put('posts', {
+      id: db.uid(), author: me.username, kind: 'photo', mediaType: 'image', media: blob, caption,
+      licks: [], barkCount: 0, report: {}, goalId: g.id, goalTitle: g.title, createdAt: Date.now(), expiresAt: null,
+    });
+    toast('Progress posted to your profile');
+    go(`#/profile/${me.username}`);
+  } catch (err) {
+    el.disabled = false;
+    el.innerHTML = label;
+    toast(`Could not post it: ${err.message}`);
+  }
 };
 
 actions['goal-delete'] = async el => {

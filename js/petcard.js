@@ -138,3 +138,124 @@ export async function cardImage(card) {
 
   return new Promise(resolve => c.toBlob(resolve, 'image/png'));
 }
+
+/**
+ * A shareable picture of a training goal in progress (1080 wide, height fits the steps).
+ * @param {{petName:string, avatar:Blob|string|null, title:string, steps:{text:string,done:boolean}[], pct:number, done:boolean, streak:number, owner:string, accent:string}} goal
+ */
+export async function goalImage(goal) {
+  const font = (weight, size) => `${weight} ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  // Size the picture to fit: taller for long titles and more steps, so there's no big empty gap.
+  const measure = document.createElement('canvas').getContext('2d');
+  measure.font = font(800, 64);
+  const titleRows = measure.measureText(goal.title).width > 820 ? 2 : 1;
+  const shown = Math.min(goal.steps.length, 6);
+  const W = 1080, H = Math.max(1080, 880 + (titleRows - 1) * 74 + shown * 72 + (goal.steps.length > 6 ? 50 : 0));
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const fit = (text, max, weight, size) => { // shrink long text until it fits on one line
+    let s = size; ctx.font = font(weight, s);
+    while (ctx.measureText(text).width > max && s > 28) { s -= 2; ctx.font = font(weight, s); }
+    return s;
+  };
+  const wrap = (text, max) => {
+    const words = String(text).split(/\s+/), lines = [];
+    for (const w of words) {
+      const last = lines[lines.length - 1];
+      if (last && ctx.measureText(`${last} ${w}`).width <= max) lines[lines.length - 1] = `${last} ${w}`;
+      else lines.push(w);
+    }
+    return lines;
+  };
+
+  // Background
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, goal.accent); bg.addColorStop(1, '#1B1F3B');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 0.08; ctx.fillStyle = '#fff';
+  for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.arc(120 + i * 190, 90 + (i % 2) * 60, 46, 0, Math.PI * 2); ctx.fill(); }
+  ctx.globalAlpha = 1;
+
+  // Card
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = 'rgba(0,0,0,.25)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 12;
+  roundRect(ctx, 64, 150, W - 128, H - 260, 56); ctx.fill();
+  ctx.shadowColor = 'transparent';
+
+  // Header: photo, "Rex's training", status pill
+  const img = await loadImage(goal.avatar);
+  const ax = 140, ay = 250, ar = 58;
+  ctx.save(); ctx.beginPath(); ctx.arc(ax, ay, ar, 0, Math.PI * 2); ctx.clip();
+  if (img) {
+    const s = Math.max((2 * ar) / img.width, (2 * ar) / img.height);
+    ctx.drawImage(img, ax - (img.width * s) / 2, ay - (img.height * s) / 2, img.width * s, img.height * s);
+  } else {
+    ctx.fillStyle = goal.accent; ctx.fillRect(ax - ar, ay - ar, 2 * ar, 2 * ar);
+    ctx.fillStyle = '#fff'; ctx.font = font(800, 56); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText((goal.petName || '?').charAt(0).toUpperCase(), ax, ay + 3);
+  }
+  ctx.restore();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#12151b'; ctx.font = font(800, 40);
+  ctx.fillText(`${goal.petName || 'My pet'}'s training`, 220, 240, 520);
+  ctx.fillStyle = '#7a8291'; ctx.font = font(600, 28);
+  ctx.fillText(new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }), 220, 284);
+  const pill = goal.done ? 'GOAL COMPLETE' : 'IN PROGRESS';
+  ctx.font = font(800, 24);
+  const pw = ctx.measureText(pill).width + 44;
+  ctx.fillStyle = goal.done ? '#2fbf71' : goal.accent;
+  roundRect(ctx, W - 128 - pw, 222, pw, 52, 26); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillText(pill, W - 128 - pw + 22, 257);
+
+  // Goal title
+  ctx.fillStyle = '#12151b';
+  const ts = fit(goal.title, W - 260, 800, 64);
+  const titleLines = wrap(goal.title, W - 260).slice(0, 2);
+  titleLines.forEach((l, i) => ctx.fillText(l, 130, 400 + i * (ts + 10), W - 260));
+  let y = 400 + (titleLines.length - 1) * (ts + 10) + 60;
+
+  // Progress bar
+  ctx.fillStyle = '#eef0f4'; roundRect(ctx, 130, y, W - 260, 30, 15); ctx.fill();
+  if (goal.pct > 0) {
+    const pg = ctx.createLinearGradient(130, 0, W - 130, 0);
+    pg.addColorStop(0, goal.done ? '#2fbf71' : goal.accent); pg.addColorStop(1, goal.done ? '#51cf66' : '#ff4f7b');
+    ctx.fillStyle = pg; roundRect(ctx, 130, y, Math.max(30, (W - 260) * goal.pct / 100), 30, 15); ctx.fill();
+  }
+  y += 82;
+  ctx.fillStyle = '#12151b'; ctx.font = font(800, 46); ctx.fillText(`${goal.pct}%`, 130, y);
+  const doneSteps = goal.steps.filter(s => s.done).length;
+  ctx.fillStyle = '#7a8291'; ctx.font = font(600, 30);
+  ctx.fillText(goal.steps.length ? `${doneSteps} of ${goal.steps.length} steps done` : (goal.done ? 'All done!' : 'Just getting started'), 260, y);
+  y += 56;
+
+  // Steps checklist
+  ctx.font = font(600, 32);
+  for (const step of goal.steps.slice(0, 6)) {
+    const cy = y + 26;
+    ctx.beginPath(); ctx.arc(152, cy, 22, 0, Math.PI * 2);
+    if (step.done) { ctx.fillStyle = '#2fbf71'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(141, cy); ctx.lineTo(149, cy + 8); ctx.lineTo(164, cy - 9); ctx.stroke(); }
+    else { ctx.strokeStyle = '#d5d9e0'; ctx.lineWidth = 4; ctx.stroke(); }
+    ctx.fillStyle = step.done ? '#7a8291' : '#12151b';
+    const t = step.text.length > 44 ? `${step.text.slice(0, 43)}…` : step.text;
+    ctx.fillText(t, 196, cy + 11, W - 340);
+    y += 72;
+  }
+  if (goal.steps.length > 6) { ctx.fillStyle = '#7a8291'; ctx.font = font(600, 28); ctx.fillText(`+ ${goal.steps.length - 6} more`, 196, y + 20); }
+
+  // Streak
+  const sy = H - 200;
+  ctx.strokeStyle = '#eef0f4'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(130, sy - 40); ctx.lineTo(W - 130, sy - 40); ctx.stroke();
+  ctx.textAlign = 'left';
+  ctx.fillStyle = goal.streak ? '#ff7a3d' : '#7a8291'; ctx.font = font(800, 36);
+  ctx.fillText(goal.streak ? `${goal.streak}-day training streak` : 'Training today', 130, sy + 6);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#7a8291'; ctx.font = font(600, 28);
+  ctx.fillText(`@${goal.owner}`, W - 130, sy + 4);
+
+  // Footer
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.font = font(700, 34);
+  ctx.fillText('PetPost', W / 2, H - 46);
+
+  return new Promise(resolve => c.toBlob(resolve, 'image/jpeg', 0.92));
+}
