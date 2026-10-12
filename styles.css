@@ -585,3 +585,51 @@ body::before {
 /* Upright phone videos and photos shouldn't fill the whole screen */
 .preview img, .preview video { max-height: 46vh; }
 .media img, .media video { max-height: 62vh; }
+
+/* ---------- following and people */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mode-chip.icon-chip { padding: 8px 10px; }
+.stats.four { grid-template-columns: repeat(4, 1fr); }
+.stats button { display: flex; flex-direction: column; align-items: center; padding: 10px 4px; border-radius: var(--radius-sm); background: var(--surface-2); border: 0; cursor: pointer; color: var(--text); font: inherit; }
+.stats button:hover { background: var(--line); }
+.stats button strong { font-size: 18px; }
+.stats button span { font-size: 12px; color: var(--muted); }
+.profile-actions { grid-column: 1 / -1; margin-top: 8px; }
+@media (max-width: 520px) { .profile-actions { justify-content: center; } .stats.four div, .stats.four button { padding: 8px 2px; } }
+.feed-seg { margin: 0 0 14px; background: var(--surface); backdrop-filter: blur(16px); border: 1px solid var(--line); }
+.people-card { padding: 6px 8px; }
+.people-card .empty { padding: 30px 16px; }
+.people { list-style: none; margin: 0; padding: 0; }
+.person { display: flex; align-items: center; gap: 12px; padding: 10px 8px; }
+.person + .person { border-top: 1px solid var(--line); }
+.person[hidden] { display: none; }
+.person-link { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.person .btn { flex: none; min-width: 96px; }
+.search { margin-top: 14px; }
+
+/* ---------- pet card */
+.form-section { margin: 6px 0 -4px; font-size: 15px; }
+.pet-card-modal { max-width: 440px; }
+.pet-card {
+  border-radius: 24px; padding: 70px 20px 20px; margin-top: 56px; position: relative; text-align: center;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 16%, var(--surface-solid)), var(--surface-solid) 60%);
+  border: 1px solid var(--line);
+}
+.pc-photo { position: absolute; top: -52px; left: 50%; transform: translateX(-50%); }
+.pc-photo .avatar { width: 112px; height: 112px; font-size: 42px; border: 5px solid var(--surface-solid); box-shadow: var(--shadow); }
+.pet-card h2 { font-size: 28px; margin: 0; letter-spacing: -0.02em; }
+.pc-line { color: var(--muted); font-weight: 500; margin-top: 2px; }
+.pc-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0 4px; text-align: left; }
+.pc-facts div { background: var(--surface-2); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; min-width: 0; }
+.pc-facts span, .pc-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pc-facts strong { overflow-wrap: anywhere; line-height: 1.3; }
+.pc-tricks { margin-top: 14px; text-align: left; }
+.pc-tricks .chips { margin-top: 8px; }
+.chip.trick { background: var(--accent); border-color: transparent; color: #fff; }
+.chip.trick .ic { width: 14px; height: 14px; }
+.pc-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.pc-stats div { display: flex; flex-direction: column; }
+.pc-stats strong { font-size: 24px; }
+.pc-stats span { font-size: 12px; color: var(--muted); }
+.pc-owner { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.pc-owner .ic { width: 16px; height: 16px; color: var(--accent); }

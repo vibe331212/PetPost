@@ -7,6 +7,7 @@ import { openCamera, cameraBlockedHelp } from './camera.js';
 import { soundFor, countLabel, PET_TYPES } from './sounds.js';
 import { showTrophy } from './celebrate.js';
 import { openStickerEditor } from './stickers.js';
+import { ageText, trickName, cardImage } from './petcard.js';
 
 const $app = document.getElementById('app');
 const scene = new Scene(document.getElementById('scene'));
@@ -149,7 +150,7 @@ async function route() {
   if (!me) return renderAuth();
   if (!me.cameraAsked) return renderPermission();
   const [view = 'feed', a, b] = parts();
-  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare };
+  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople };
   const fn = views[view] || viewFeed;
   if (draft && view !== 'create') resetDraft();
   shell(views[view] ? view : 'feed', a);
@@ -171,6 +172,7 @@ function shell(active, arg) {
     <header class="topbar">
       <a href="#/feed" class="brand">${icon('paw')}<span>PetPost</span></a>
       <div class="row top-actions">
+        <a class="mode-chip icon-chip" href="#/people" aria-label="Find people" title="Find people">${icon('users')}</a>
         ${isInstalled() ? '' : `<button class="mode-chip install-chip" data-action="install">${icon('download')}<span>Install app</span></button>`}
         <a class="mode-chip" href="#/modes">${icon('mode')}<span>${esc(findTheme(me.theme).name)}</span></a>
       </div>
@@ -432,7 +434,9 @@ actions.back = () => (history.length > 1 ? history.back() : go('#/feed'));
 async function viewFeed(main) {
   const [posts, users] = await Promise.all([db.all('posts'), usersMap()]);
   const now = Date.now();
-  const feed = posts.filter(p => p.kind !== 'moment').sort((a, b) => b.createdAt - a.createdAt);
+  const following = new Set([...(me.following || []), me.username]);
+  const mode = feedMode();
+  const feed = posts.filter(p => p.kind !== 'moment' && (mode === 'all' || following.has(p.author))).sort((a, b) => b.createdAt - a.createdAt);
 
   // clean up expired moments
   posts.filter(p => p.kind === 'moment' && p.expiresAt <= now).forEach(p => deletePost(p.id));
@@ -454,7 +458,17 @@ async function viewFeed(main) {
           <span class="mb-name">${esc(g.user.username === me.username ? 'You' : g.user.displayName)}</span>
         </button>`).join('')}
     </section>
-    ${feed.length ? feed.map(p => postCard(p, users.get(p.author))).join('') : `
+    <div class="seg feed-seg">
+      <button class="${mode === 'all' ? 'on' : ''}" data-action="feed-mode" data-mode="all">Everyone</button>
+      <button class="${mode === 'following' ? 'on' : ''}" data-action="feed-mode" data-mode="following">Following</button>
+    </div>
+    ${feed.length ? feed.map(p => postCard(p, users.get(p.author))).join('') : mode === 'following' && !(me.following || []).length ? `
+      <div class="card empty">
+        ${icon('users', 'big')}
+        <h2>Follow some pets</h2>
+        <p class="muted">Posts from people you follow show up here.</p>
+        <a class="btn primary" href="#/people">${icon('users')}Find people</a>
+      </div>` : `
       <div class="card empty">
         ${icon('paw', 'big')}
         <h2>Your feed is waiting</h2>
@@ -462,6 +476,14 @@ async function viewFeed(main) {
         <a class="btn primary" href="#/create">${icon('plus')}Create your first post</a>
       </div>`}`;
 }
+
+function feedMode() {
+  try { return localStorage.getItem('petpost.feed') === 'following' ? 'following' : 'all'; } catch { return 'all'; }
+}
+actions['feed-mode'] = el => {
+  try { localStorage.setItem('petpost.feed', el.dataset.mode); } catch { /* remembered for this visit only */ }
+  viewFeed(document.getElementById('view'));
+};
 
 // ---------- moments viewer
 actions['open-moments'] = el => openViewer(+el.dataset.index);
@@ -855,7 +877,10 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
   const trophies = [...(u.trophies || [])].sort((a, b) => a.earnedAt - b.earnedAt);
   const [mine, goals] = await Promise.all([db.byIndex('posts', 'author', u.username), db.byIndex('goals', 'owner', u.username)]);
   const posts = mine.filter(p => p.kind !== 'moment').sort((a, b) => b.createdAt - a.createdAt);
-  const licks = posts.reduce((n, p) => n + p.licks.length, 0);
+  const allUsers = await db.all('users');
+  const followers = allUsers.filter(x => (x.following || []).includes(u.username)).length;
+  const followingCount = (u.following || []).length;
+  const iFollow = (me.following || []).includes(u.username);
 
   let content = '';
   if (tab === 'trophies') {
@@ -892,16 +917,20 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
         ${u.petName ? `<p class="pet">${icon('paw')}${esc(u.petName)}${u.petType ? ` <span class="muted">· ${esc(u.petType)}</span>` : ''}</p>` : ''}
         ${u.bio ? `<p class="bio">${esc(u.bio)}</p>` : ''}
       </div>
-      <div class="stats">
+      <div class="stats four">
         <div><strong>${posts.length}</strong><span>${plural(posts.length, 'Post')}</span></div>
-        <div><strong>${licks}</strong><span>${plural(licks, 'Lick')}</span></div>
+        <button data-action="follow-list" data-user="${esc(u.username)}" data-kind="followers"><strong>${followers}</strong><span>${followers === 1 ? 'Follower' : 'Followers'}</span></button>
+        <button data-action="follow-list" data-user="${esc(u.username)}" data-kind="following"><strong>${followingCount}</strong><span>Following</span></button>
         <div><strong>${trophies.length}</strong><span>${trophies.length === 1 ? 'Trophy' : 'Trophies'}</span></div>
       </div>
-      ${own ? `
-        <div class="row wrap">
+      <div class="row wrap profile-actions">
+        ${own ? `
           <button class="btn ghost" data-action="edit-profile">${icon('edit')}Edit profile</button>
-          <button class="btn ghost" data-action="sign-out">${icon('logout')}Sign out</button>
-        </div>` : ''}
+          <button class="btn ghost" data-action="pet-card" data-user="${esc(u.username)}">${icon('card')}Pet card</button>
+          <button class="btn ghost" data-action="sign-out">${icon('logout')}Sign out</button>` : `
+          <button class="btn ${iFollow ? 'ghost' : 'primary'}" data-action="follow" data-user="${esc(u.username)}">${icon(iFollow ? 'check' : 'userPlus')}${iFollow ? 'Following' : 'Follow'}</button>
+          <button class="btn ghost" data-action="pet-card" data-user="${esc(u.username)}">${icon('card')}Pet card</button>`}
+      </div>
     </section>
     <nav class="tabs">${tabLink('posts', 'Posts')}${tabLink('videos', 'Videos')}${own ? tabLink('saved', 'Saved') : ''}${tabLink('goals', 'Goals')}${tabLink('trophies', 'Trophies')}</nav>
     <section class="tab-body">${content}</section>`;
@@ -921,6 +950,15 @@ actions['edit-profile'] = () => {
       <label class="field"><span>Pet type</span><select name="petType">${[...new Set([...PET_TYPES, me.petType].filter(Boolean))].map(t => `<option ${t === me.petType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
       <p class="sound-hint muted small">${soundHint(me.petType)}</p>
       <label class="field"><span>Bio</span><textarea name="bio" maxlength="200" rows="3">${esc(me.bio)}</textarea></label>
+      <h3 class="form-section">Pet card</h3>
+      <div class="two">
+        <label class="field"><span>Breed</span><input name="breed" maxlength="40" value="${esc(me.breed || '')}" placeholder="Golden retriever"></label>
+        <label class="field"><span>Birthday</span><input type="date" name="birthday" value="${esc(me.birthday || '')}"></label>
+      </div>
+      <div class="two">
+        <label class="field"><span>Favorite treat</span><input name="treat" maxlength="40" value="${esc(me.treat || '')}" placeholder="Peanut butter"></label>
+        <label class="field"><span>Favorite toy</span><input name="toy" maxlength="40" value="${esc(me.toy || '')}" placeholder="Squeaky ball"></label>
+      </div>
       <details>
         <summary>Change password</summary>
         <div class="stack pad-top">
@@ -963,6 +1001,9 @@ actions['delete-account'] = async el => {
     if (p) { p.barkCount = Math.max(0, (p.barkCount || 1) - 1); await db.put('posts', p); }
   }
   await Promise.all(goals.map(g => db.del('goals', g.id)));
+  for (const other of await db.all('users')) {
+    if ((other.following || []).includes(name)) { other.following = other.following.filter(n => n !== name); await db.put('users', other); }
+  }
   await db.del('users', name);
   el.closest('dialog')?.close();
   auth.signOut();
@@ -989,11 +1030,152 @@ forms.profile = (form, fd) => withBusy(form, async () => {
   me.petName = String(fd.get('petName') || '').trim();
   me.petType = String(fd.get('petType') || '').trim();
   me.bio = String(fd.get('bio') || '').trim();
+  me.breed = String(fd.get('breed') || '').trim();
+  me.birthday = String(fd.get('birthday') || '');
+  me.treat = String(fd.get('treat') || '').trim();
+  me.toy = String(fd.get('toy') || '').trim();
   await saveMe();
   form.closest('dialog').close();
   toast(next ? 'Profile and password updated' : 'Profile updated');
   route();
 });
+
+// ---------- people and following
+// Everyone with an account in PetPost on this device. (Following friends on other phones would need an online database.)
+async function viewPeople(main) {
+  const users = (await db.all('users')).filter(u => u.username !== me.username).sort((a, b) => a.displayName.localeCompare(b.displayName));
+  main.innerHTML = `
+    <section class="card">
+      <h1>Find people</h1>
+      <p class="muted">Follow pets to see their posts in your Following feed.</p>
+      <label class="field search"><span class="sr-only">Search</span><input type="search" class="people-search" placeholder="Search names, usernames or pets" autocomplete="off"></label>
+    </section>
+    <section class="card people-card">
+      ${users.length ? `<ul class="people">${users.map(personRow).join('')}</ul>` : `
+        <div class="empty">${icon('users', 'big')}<p class="muted">No one else is on PetPost on this device yet. When someone makes an account here, they show up in this list.</p></div>`}
+    </section>`;
+  main.querySelector('.people-search').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    main.querySelectorAll('.person').forEach(li => { li.hidden = q && !li.dataset.search.includes(q); });
+  });
+}
+
+function personRow(u) {
+  const on = (me.following || []).includes(u.username);
+  return `
+    <li class="person" data-search="${esc(`${u.displayName} ${u.username} ${u.petName} ${u.petType}`.toLowerCase())}">
+      <a class="person-link" href="#/profile/${esc(u.username)}">${avatar(u)}<span class="who"><span class="name">${esc(u.displayName)}</span><span class="sub">@${esc(u.username)}${u.petName ? ` · ${esc(u.petName)}` : ''}${u.petType ? ` · ${esc(u.petType)}` : ''}</span></span></a>
+      ${u.username === me.username ? '' : `<button class="btn sm ${on ? 'ghost' : 'primary'}" data-action="follow" data-user="${esc(u.username)}">${on ? 'Following' : 'Follow'}</button>`}
+    </li>`;
+}
+
+actions.follow = async el => {
+  const name = el.dataset.user;
+  if (!name || name === me.username) return;
+  me.following ||= [];
+  const i = me.following.indexOf(name);
+  if (i >= 0) me.following.splice(i, 1); else me.following.push(name);
+  await saveMe();
+  toast(i >= 0 ? `Unfollowed @${name}` : `Following @${name}`);
+  if (el.closest('.people') || el.closest('dialog')) {
+    const on = i < 0;
+    el.textContent = on ? 'Following' : 'Follow';
+    el.classList.toggle('primary', !on); el.classList.toggle('ghost', on);
+  } else route();
+};
+
+actions['follow-list'] = async el => {
+  const name = el.dataset.user, kind = el.dataset.kind;
+  const users = await db.all('users');
+  const u = users.find(x => x.username === name);
+  if (!u) return;
+  const list = kind === 'followers'
+    ? users.filter(x => (x.following || []).includes(name))
+    : users.filter(x => (u.following || []).includes(x.username));
+  const d = document.createElement('dialog');
+  d.className = 'modal';
+  d.innerHTML = `
+    <header class="row"><h2>${kind === 'followers' ? 'Followers' : 'Following'}</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
+    ${list.length ? `<ul class="people">${list.map(personRow).join('')}</ul>` : `<p class="muted pad-top">${kind === 'followers' ? 'No followers yet.' : 'Not following anyone yet.'}</p>`}`;
+  d.addEventListener('click', e => { if (e.target.closest('.person-link')) d.close(); });
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+};
+
+// ---------- pet card
+async function petCard(u) {
+  const goals = await db.byIndex('goals', 'owner', u.username);
+  const tricks = goals.filter(g => g.completedAt).sort((a, b) => a.completedAt - b.completedAt).map(g => trickName(g.title)).filter(Boolean);
+  const best = streakStats(u.practiceDays).best;
+  const facts = [
+    ['Age', ageText(u.birthday)],
+    ['Birthday', u.birthday ? new Date(`${u.birthday}T12:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric' }) : ''],
+    ['Favorite treat', u.treat],
+    ['Favorite toy', u.toy],
+  ].filter(([, v]) => v);
+  return {
+    petName: u.petName || u.displayName,
+    line: [u.petType, u.breed].filter(Boolean).join(' · '),
+    facts,
+    tricks,
+    stats: [[String((u.trophies || []).length), (u.trophies || []).length === 1 ? 'Trophy' : 'Trophies'], [String(tricks.length), tricks.length === 1 ? 'Trick' : 'Tricks'], [String(best), 'Best streak']],
+    owner: u.username,
+    avatar: u.avatar || null,
+    accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#3b5bfd',
+  };
+}
+
+actions['pet-card'] = async el => {
+  const u = el.dataset.user === me.username ? me : await db.get('users', el.dataset.user);
+  if (!u) return;
+  const card = await petCard(u);
+  const own = u.username === me.username;
+  const d = document.createElement('dialog');
+  d.className = 'modal pet-card-modal';
+  d.innerHTML = `
+    <div class="pet-card">
+      <div class="pc-photo">${avatar(u, 'xl')}</div>
+      <h2>${esc(card.petName)}</h2>
+      ${card.line ? `<p class="pc-line">${esc(card.line)}</p>` : ''}
+      ${card.facts.length ? `<div class="pc-facts">${card.facts.map(([k, v]) => `<div><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div>` : ''}
+      <div class="pc-tricks"><span class="pc-label">Tricks learned</span>
+        <div class="chips">${card.tricks.length ? card.tricks.map(t => `<span class="chip trick">${icon('check')}${esc(t)}</span>`).join('') : '<span class="chip">Still learning</span>'}</div>
+      </div>
+      <div class="pc-stats">${card.stats.map(([v, k]) => `<div><strong>${esc(v)}</strong><span>${esc(k)}</span></div>`).join('')}</div>
+      <p class="pc-owner">${icon('paw')}@${esc(u.username)} on PetPost</p>
+    </div>
+    ${own && !card.facts.length ? `<p class="muted small center pad-top">Add a breed, birthday and favorites in Edit profile to fill in the card.</p>` : ''}
+    <div class="row wrap pad-top">
+      <button type="button" class="btn ghost" data-action="close-dialog">Close</button>
+      <span class="spacer"></span>
+      ${own ? `<button type="button" class="btn ghost" data-action="pet-card-edit">${icon('edit')}Edit details</button>` : ''}
+      <button type="button" class="btn primary" data-action="pet-card-share">${icon('share')}Share card</button>
+    </div>`;
+  d.petCard = card;
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+};
+
+actions['pet-card-edit'] = el => { el.closest('dialog').close(); actions['edit-profile'](); };
+
+actions['pet-card-share'] = async el => {
+  const d = el.closest('dialog');
+  el.disabled = true;
+  const blob = await cardImage(d.petCard);
+  el.disabled = false;
+  const name = `${(d.petCard.petName || 'pet').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-pet-card.png`;
+  const text = `Meet ${d.petCard.petName} on PetPost`;
+  if (Native.on) return downloadBlob(blob, name, text);
+  const file = new File([blob], name, { type: 'image/png' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'PetPost', text }); } catch { /* cancelled */ }
+  } else {
+    downloadBlob(blob, name);
+    toast('Pet card saved to your device');
+  }
+};
 
 // ---------- goals
 const GOAL_TEMPLATES = {
