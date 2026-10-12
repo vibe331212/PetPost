@@ -20,8 +20,18 @@ const ms = t => Date.parse(t) || 0;
 export const mediaUrl = path => (path ? sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl : null);
 
 function check({ data, error }) {
-  if (error) throw new Error(error.message || 'Something went wrong talking to PetPost');
+  if (error) {
+    // The account was deleted while this device was still signed in to it.
+    if (/(private_data|profiles)_id_fkey|User from sub claim in JWT does not exist/i.test(error.message || '')) accountGone();
+    throw new Error(error.message || 'Something went wrong talking to PetPost');
+  }
   return data;
+}
+
+// Signs out and tells the app, so it can show the sign-in screen with a clear message.
+function accountGone() {
+  signOut();
+  window.dispatchEvent(new CustomEvent('petpost:account-gone'));
 }
 
 // ---------- signed-in person
@@ -161,8 +171,9 @@ export async function put(store, value) {
       value.avatar = mediaUrl(value.avatarPath);
     }
     privateCache = pick(value, PRIVATE_FIELDS);
+    const updated = check(await sb.from('profiles').update({ data: pick(value, PUBLIC_FIELDS) }).eq('id', myId).select('id'));
+    if (!updated.length) { accountGone(); throw new Error('This account no longer exists. Please make a new one.'); }
     await Promise.all([
-      sb.from('profiles').update({ data: pick(value, PUBLIC_FIELDS) }).eq('id', myId).then(check),
       sb.from('private_data').upsert({ id: myId, data: privateCache }).then(check),
       syncFollows(value),
     ]);
@@ -304,7 +315,23 @@ export async function signOut() {
 export async function currentUser() {
   const { data } = await sb.auth.getSession();
   if (!data.session) return null;
-  try { return await loadMe(data.session); } catch (err) { console.error(err); return null; }
+  // Ask the server too: the saved sign-in might belong to an account that has since been deleted.
+  const { data: check, error } = await sb.auth.getUser();
+  if (error || !check?.user) { await signOut(); return null; }
+  try {
+    const me = await loadMe(data.session);
+    if (!me) await signOut();
+    return me;
+  } catch (err) { console.error(err); return null; }
+}
+
+/** True if the signed-in account still exists online. */
+export async function stillSignedIn() {
+  if (!myId) return false;
+  const { data, error } = await sb.auth.getUser();
+  if (error || !data?.user) return false;
+  const { data: row } = await sb.from('profiles').select('id').eq('id', myId).maybeSingle();
+  return !!row;
 }
 
 export async function deleteAccount() {

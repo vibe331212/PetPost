@@ -2148,6 +2148,22 @@ actions.install = async () => {
   if ('serviceWorker' in navigator && !Native.on) setUpUpdates();
 })();
 
+// ---------- if your account is deleted elsewhere (or by a clean-up), go back to sign in
+function accountGone() {
+  if (!me) return;
+  me = null;
+  document.querySelectorAll('dialog[open]').forEach(d => d.close());
+  syncNativeCare();
+  applyTheme('clean');
+  history.replaceState(null, '', location.pathname);
+  renderAuth('signup');
+  toast('That account no longer exists. Make a new one to keep using PetPost.');
+}
+window.addEventListener('petpost:account-gone', accountGone);
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && me && !(await db.stillSignedIn())) accountGone();
+});
+
 // ---------- automatic updates
 // Checks for a new version on launch and whenever the app comes back to the front.
 // When one arrives it reloads, unless you are in the middle of something, then it offers a button.
