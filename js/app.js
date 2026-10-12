@@ -150,7 +150,7 @@ async function route() {
   if (!me) return renderAuth();
   if (!me.cameraAsked) return renderPermission();
   const [view = 'feed', a, b] = parts();
-  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople };
+  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople, notifications: viewNotifications };
   const fn = views[view] || viewFeed;
   if (draft && view !== 'create') resetDraft();
   shell(views[view] ? view : 'feed', a);
@@ -158,6 +158,7 @@ async function route() {
   try {
     await fn(main, a, b);
     updateCareBadge();
+    updateBell();
   } catch (err) {
     console.error(err);
     main.innerHTML = `<div class="card empty"><p>Something went wrong: ${esc(err.message)}</p></div>`;
@@ -173,6 +174,7 @@ function shell(active, arg) {
       <a href="#/feed" class="brand">${icon('paw')}<span>PetPost</span></a>
       <div class="row top-actions">
         <a class="mode-chip icon-chip" href="#/people" aria-label="Find people" title="Find people">${icon('users')}</a>
+        <a class="mode-chip icon-chip bell ${active === 'notifications' ? 'on' : ''}" href="#/notifications" aria-label="Notifications" title="Notifications">${icon('bell')}<span class="bell-badge" hidden></span></a>
         ${isInstalled() ? '' : `<button class="mode-chip install-chip" data-action="install">${icon('download')}<span>Install app</span></button>`}
         <a class="mode-chip" href="#/modes">${icon('mode')}<span>${esc(findTheme(me.theme).name)}</span></a>
       </div>
@@ -368,7 +370,9 @@ actions.lick = async el => {
   const p = await db.get('posts', el.dataset.id);
   if (!p) return;
   const i = p.licks.indexOf(me.username);
-  if (i >= 0) p.licks.splice(i, 1); else p.licks.push(me.username);
+  p.lickedAt ||= {};
+  if (i >= 0) { p.licks.splice(i, 1); delete p.lickedAt[me.username]; }
+  else { p.licks.push(me.username); p.lickedAt[me.username] = Date.now(); }
   await db.put('posts', p);
   const on = i < 0;
   el.classList.toggle('on', on);
@@ -937,6 +941,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
 }
 
 actions['edit-profile'] = () => {
+  if (!me) return;
   const d = document.createElement('dialog');
   d.className = 'modal';
   d.innerHTML = `
@@ -1074,7 +1079,9 @@ actions.follow = async el => {
   if (!name || name === me.username) return;
   me.following ||= [];
   const i = me.following.indexOf(name);
-  if (i >= 0) me.following.splice(i, 1); else me.following.push(name);
+  me.followedAt ||= {};
+  if (i >= 0) { me.following.splice(i, 1); delete me.followedAt[name]; }
+  else { me.following.push(name); me.followedAt[name] = Date.now(); }
   await saveMe();
   toast(i >= 0 ? `Unfollowed @${name}` : `Following @${name}`);
   if (el.closest('.people') || el.closest('dialog')) {
@@ -1102,6 +1109,80 @@ actions['follow-list'] = async el => {
   d.addEventListener('close', () => d.remove());
   d.showModal();
 };
+
+// ---------- notifications
+// Built from what is saved: licks and barks on your posts, new followers, and new posts from people you follow.
+async function notifications() {
+  const [posts, comments, users] = await Promise.all([db.all('posts'), db.all('comments'), db.all('users')]);
+  const mine = new Map(posts.filter(p => p.author === me.username).map(p => [p.id, p]));
+  const items = [];
+  for (const p of mine.values()) {
+    for (const [who, at] of Object.entries(p.lickedAt || {})) if (who !== me.username) items.push({ type: 'lick', who, post: p, at });
+  }
+  for (const c of comments) {
+    const p = mine.get(c.postId);
+    if (p && c.author !== me.username) items.push({ type: 'bark', who: c.author, post: p, text: c.text, at: c.createdAt });
+  }
+  for (const u of users) {
+    if (u.username !== me.username && (u.following || []).includes(me.username)) items.push({ type: 'follow', who: u.username, at: u.followedAt?.[me.username] || u.createdAt });
+  }
+  const since = me.followedAt || {};
+  for (const p of posts) {
+    if (!(me.following || []).includes(p.author)) continue;
+    if (p.kind === 'moment' && p.expiresAt <= Date.now()) continue;
+    if (p.createdAt > (since[p.author] || 0)) items.push({ type: 'post', who: p.author, post: p, at: p.createdAt });
+  }
+  const map = new Map(users.map(u => [u.username, u]));
+  return items.filter(n => n.at).sort((a, b) => b.at - a.at).slice(0, 80).map(n => ({ ...n, user: map.get(n.who) || { username: n.who, displayName: n.who } }));
+}
+
+async function updateBell() {
+  const badge = document.querySelector('.bell-badge');
+  if (!badge || !me) return;
+  const fresh = (await notifications()).filter(n => n.at > (me.notifSeen || 0)).length;
+  badge.hidden = !fresh;
+  badge.textContent = fresh > 9 ? '9+' : fresh;
+}
+
+async function viewNotifications(main) {
+  const list = await notifications();
+  const seen = me.notifSeen || 0;
+  const thumb = p => p.mediaType === 'video'
+    ? `<video src="${blobURL(p.id, p.media)}#t=0.1" muted playsinline preload="metadata"></video>`
+    : `<img src="${blobURL(p.id, p.media)}" alt="" loading="lazy">`;
+  const line = n => {
+    const name = `<strong>${esc(n.user.displayName)}</strong>`;
+    if (n.type === 'lick') return `${name} licked your post`;
+    if (n.type === 'bark') return `${name} ${soundFor(n.user.petType).past}: “${esc(n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text)}”`;
+    if (n.type === 'follow') return `${name} started following you`;
+    return `${name} ${n.post.kind === 'moment' ? 'shared a moment' : n.post.mediaType === 'video' ? 'posted a new video' : 'posted a new photo'}`;
+  };
+  const iconFor = { lick: 'lick', bark: 'bark', follow: 'userPlus', post: 'photo' };
+  main.innerHTML = `
+    <section class="card">
+      <h1>Notifications</h1>
+      <p class="muted">Licks and ${esc(soundFor(me.petType).words.toLowerCase())} on your posts, new followers, and new posts from people you follow.</p>
+    </section>
+    <section class="card notif-card">
+      ${list.length ? `<ul class="notifs">${list.map(n => {
+        const href = n.type === 'follow' ? `#/profile/${esc(n.who)}` : n.post.kind === 'moment' ? '#/feed' : `#/post/${n.post.id}`;
+        const followBack = n.type === 'follow' && !(me.following || []).includes(n.who);
+        return `
+          <li class="notif ${n.at > seen ? 'new' : ''}">
+            <a class="notif-link" href="${href}">
+              <span class="notif-av">${avatar(n.user)}<span class="notif-ic ${n.type}">${icon(iconFor[n.type])}</span></span>
+              <span class="notif-text"><span>${line(n)}</span><span class="sub">${ago(n.at)}</span></span>
+              ${n.post ? `<span class="notif-thumb">${thumb(n.post)}</span>` : ''}
+            </a>
+            ${followBack ? `<button class="btn primary sm" data-action="follow" data-user="${esc(n.who)}">Follow back</button>` : ''}
+          </li>`;
+      }).join('')}</ul>` : `
+        <div class="empty">${icon('bell', 'big')}<h2>Nothing yet</h2><p class="muted">When someone licks or ${esc(soundFor(me.petType).word.toLowerCase())}s on your posts or follows you, it shows up here.</p><a class="btn primary" href="#/people">${icon('users')}Find people</a></div>`}
+    </section>`;
+  me.notifSeen = Date.now();
+  await saveMe();
+  updateBell();
+}
 
 // ---------- pet card
 async function petCard(u) {
@@ -1150,7 +1231,7 @@ actions['pet-card'] = async el => {
       <button type="button" class="btn ghost" data-action="close-dialog">Close</button>
       <span class="spacer"></span>
       ${own ? `<button type="button" class="btn ghost" data-action="pet-card-edit">${icon('edit')}Edit details</button>` : ''}
-      <button type="button" class="btn primary" data-action="pet-card-share">${icon('share')}Share card</button>
+      ${own ? `<button type="button" class="btn primary" data-action="pet-card-share">${icon('share')}Share card</button>` : ''}
     </div>`;
   d.petCard = card;
   document.body.append(d);
@@ -1162,6 +1243,7 @@ actions['pet-card-edit'] = el => { el.closest('dialog').close(); actions['edit-p
 
 actions['pet-card-share'] = async el => {
   const d = el.closest('dialog');
+  if (d.petCard.owner !== me.username) return;
   el.disabled = true;
   const blob = await cardImage(d.petCard);
   el.disabled = false;
@@ -1178,16 +1260,94 @@ actions['pet-card-share'] = async el => {
 };
 
 // ---------- goals
-const GOAL_TEMPLATES = {
+// Training goal ideas, picked by the kind of pet. Each idea is "teach <pet> to ..." plus small steps.
+const DOG_GOALS = {
   'sit': ['Hold a treat just above their nose', 'Slowly move it back over their head', 'Say "sit" the moment they sit, then reward', 'Practice 5 minutes, twice a day', 'Try it without the treat in your hand'],
   'come when called': ['Pick a happy recall word', 'Say it from a few steps away and reward big', 'Add distance a little at a time', 'Practice with mild distractions', 'Try it in a safe, enclosed outdoor space'],
   'walk nicely on a leash': ['Get them comfortable wearing the leash', 'Reward every few steps at your side', 'Stop moving when they pull', 'Change direction to keep their focus', 'Practice on a short, quiet route'],
   'shake paw': ['Hold a treat in a closed fist low down', 'Reward when they paw at your hand', 'Add the word "shake"', 'Offer an open hand instead of a fist'],
   'stay': ['Ask for a sit first', 'Show a flat palm and say "stay"', 'Step back once, return and reward', 'Slowly add more distance and time'],
   'roll over': ['Start with them lying down', 'Lure the treat from nose to shoulder', 'Keep luring until they roll', 'Add the cue "roll over"'],
-  'use the litter box': ['Pick a quiet, easy-to-reach spot', 'Place them in the box after meals and naps', 'Reward right after they use it', 'Keep it clean every day'],
   'high five': ['Teach "shake paw" first', 'Raise your hand a little higher each time', 'Add the cue "high five"'],
+  'go to their bed': ['Toss a treat onto the bed', 'Reward when all four paws are on it', 'Add the cue "bed"', 'Ask from further away', 'Have them stay there for a few seconds'],
 };
+const GOAL_IDEAS = [
+  [/dog|pupp/, DOG_GOALS],
+  [/cat|kitten/, {
+    'use the litter box': ['Pick a quiet, easy-to-reach spot', 'Place them in the box after meals and naps', 'Reward right after they use it', 'Scoop it every day'],
+    'come when called': ['Shake a treat bag and give a treat when they come', 'Add their name before the shake', 'Call from another room', 'Fade out the shake, keep the treat'],
+    'use the scratching post': ['Put the post next to their favorite scratching spot', 'Rub catnip or a toy on it', 'Reward when they scratch it', 'Cover the old spot for a while'],
+    'sit': ['Hold a treat just above their head', 'Reward the moment they sit', 'Add the word "sit"', 'Practice for a minute at a time'],
+    'high five': ['Hold a treat just out of reach', 'Reward when they lift a paw', 'Raise your hand a little higher', 'Add the cue "high five"'],
+    'walk on a harness': ['Leave the harness next to their food', 'Put it on for a minute, then treat', 'Let them walk around inside wearing it', 'Try a short, calm trip outside'],
+    'get in the carrier calmly': ['Leave the carrier open with a blanket inside', 'Feed treats near, then inside it', 'Close the door for a few seconds', 'Pick it up and carry it a short way'],
+  }],
+  [/horse|pony|donkey/, {
+    'lead nicely': ['Walk beside their shoulder, not in front', 'Stop and reward when they stop with you', 'Practice turns both ways', 'Lead past something new and calm them'],
+    'pick up their feet': ['Run your hand down the leg slowly', 'Reward any small lift', 'Hold the hoof for a second, then a few', 'Practice all four feet'],
+    'stand still for grooming': ['Tie safely in a quiet spot', 'Groom a little, then give a scratch they like', 'Groom for longer each day', 'Add the fly spray once they are calm'],
+    'load into the trailer': ['Let them sniff the trailer with the door open', 'Reward one hoof on the ramp', 'Walk all the way in, then right out', 'Close the door for a few seconds, then open'],
+    'come to the gate when called': ['Call their name at feeding time', 'Reward at the gate every time', 'Call from further across the field', 'Call at other times, still reward'],
+  }],
+  [/chicken|hen|rooster/, {
+    'come when called': ['Use the same call every time you bring treats', 'Scatter a few treats right after calling', 'Call from further away', 'Call when they are busy scratching'],
+    'eat from my hand': ['Sit still in the run with treats', 'Drop treats near your feet', 'Hold treats in an open flat hand', 'Let them come to you, never grab'],
+    'go back to the coop at dusk': ['Keep a light on in the coop at first', 'Put a treat inside at bedtime', 'Call them over with your treat call', 'Close the door once everyone is in'],
+    'be picked up calmly': ['Sit with them on your lap with treats', 'Hold their wings gently against their body', 'Pick up, hold for a few seconds, set down', 'Hold a little longer each time'],
+    'lay in the nest box': ['Add soft bedding to the nest boxes', 'Put a fake or wooden egg in each box', 'Collect eggs from the floor quickly', 'Keep the boxes darker and quiet'],
+  }],
+  [/duck|goose/, {
+    'come when called': ['Use the same call with peas or lettuce', 'Toss treats right after the call', 'Call from further away', 'Call when they are on the water'],
+    'go into the shelter at night': ['Put their food just inside the door', 'Walk behind them calmly with arms out', 'Use your call at bedtime', 'Close up once all are inside'],
+    'eat from my hand': ['Float treats in a shallow dish', 'Hold the dish near you', 'Offer treats on a flat hand', 'Stay still and let them come'],
+  }],
+  [/bird|parrot|budgie|parakeet|canary|cockatiel/, {
+    'step up onto my finger': ['Let them get used to your hand near the cage', 'Offer a treat from your fingers', 'Hold a finger just above their feet', 'Say "step up" as they climb on, then reward'],
+    'come out of the cage calmly': ['Open the door and wait quietly', 'Put a treat on a perch by the door', 'Reward any step outside', 'Practice going back in for a treat too'],
+    'say a word': ['Pick one short, happy word', 'Say it every time you do the same thing', 'Repeat it calmly a few times a day', 'Reward any sound that is close'],
+    'turn around': ['Hold a treat by their head', 'Move it slowly around behind them', 'Reward when they turn all the way', 'Add a hand signal'],
+    'wave': ['Teach "step up" first', 'Lift your finger near their foot, reward any lift', 'Add the word "wave"', 'Reward only higher waves'],
+  }],
+  [/rabbit|bunny/, {
+    'use the litter box': ['Put hay at one end of the box', 'Move droppings into the box', 'Clean other spots with vinegar', 'Reward when they use it'],
+    'come when called': ['Shake a treat cup, then give a treat', 'Add their name before the shake', 'Call from further away', 'Call from another room'],
+    'jump onto a step': ['Use a low, sturdy step', 'Lure them up with a treat', 'Add a word like "up"', 'Try a slightly higher step'],
+    'be picked up calmly': ['Sit on the floor and let them come to you', 'Stroke their back and give a treat', 'Lift a little with support under the back legs', 'Hold close and low, then set down'],
+  }],
+  [/guinea|hamster|mouse|rat|gerbil|ferret/, {
+    'come to my hand': ['Rest your hand in the cage without moving', 'Hold a treat between your fingers', 'Let them climb on to take it', 'Lift a little while they eat'],
+    'be held calmly': ['Scoop with both hands from underneath', 'Hold low over a soft surface', 'Offer a treat while holding', 'Hold a little longer each day'],
+    'go through a tunnel': ['Put a treat at the end of the tunnel', 'Start with a short tunnel', 'Add a word as they go through', 'Use a longer tunnel'],
+    'stand up for a treat': ['Hold a treat just above their nose', 'Reward when they rise up', 'Add a word like "up"', 'Hold it a little higher'],
+  }],
+  [/fish/, {
+    'eat from my fingertips': ['Feed at the same spot and time every day', 'Hold food just above the water', 'Lower your fingers to the surface', 'Wait still until they come'],
+    'come to the glass when I wave': ['Wave the same way right before feeding', 'Feed only after the wave', 'Wave without feeding sometimes, then feed', 'Check if they come to the wave alone'],
+    'swim through a hoop': ['Put a small hoop in the tank', 'Hold food on the other side of it', 'Feed only after they swim through', 'Move the hoop to new spots'],
+  }],
+  [/snake|reptile|lizard|turtle|tortoise|gecko|dragon/, {
+    'be handled calmly': ['Let them see your hand before you touch', 'Support their whole body when lifting', 'Hold for a minute, then return them', 'Handle a little longer each time'],
+    'eat from tongs': ['Use the same tongs every time', 'Wiggle food slowly in front of them', 'Feed at the same time of day', 'Wait patiently, don’t force it'],
+    'come to the front of the tank': ['Feed at the front at the same time', 'Tap the glass gently before feeding', 'Reward any move toward you', 'Try the tap without food first'],
+  }],
+  [/cow|cattle|calf|goat|sheep|lamb|pig/, {
+    'come when called': ['Use the same call with a small treat', 'Reward at the gate every time', 'Call from further across the field', 'Call at other times, still reward'],
+    'walk on a halter or lead': ['Let them wear the halter in the pen', 'Lead a few steps, then reward', 'Practice stopping and starting', 'Walk outside the pen together'],
+    'stand still to be brushed': ['Brush their favorite itchy spot first', 'Reward for standing calmly', 'Brush a bit longer each day', 'Brush the legs and belly too'],
+    'go into the trailer or barn': ['Feed near the door, then just inside', 'Walk in with them a few times', 'Close the door for a few seconds', 'Practice before you really need it'],
+  }],
+  [/frog|toad|axolotl/, {
+    'eat from tongs': ['Use soft-tipped tongs', 'Wiggle food slowly near them', 'Feed at the same time each day', 'Be patient and still'],
+    'come to the feeding spot': ['Always feed in the same spot', 'Feed at the same time each day', 'Wait a moment before offering food', 'Check if they wait there for you'],
+  }],
+];
+const GENERIC_GOALS = {
+  'come when called': ['Pick one call or sound', 'Reward the moment they come', 'Practice a few times a day', 'Call from further away'],
+  'be handled calmly': ['Let them get used to your hand nearby', 'Touch gently, then reward', 'Hold for a few seconds, then let go', 'Hold a little longer each day'],
+  'eat from my hand': ['Sit still nearby with treats', 'Drop treats close to you', 'Offer treats on a flat hand', 'Let them come to you'],
+  'learn a new trick': ['Pick one small trick', 'Reward every tiny step toward it', 'Add a word or signal', 'Practice a few minutes a day'],
+};
+const goalIdeas = petType => (GOAL_IDEAS.find(([re]) => re.test(String(petType || '').toLowerCase())) || [null, GENERIC_GOALS])[1];
 
 function dueLabel(g) {
   if (!g.target || g.completedAt) return '';
@@ -1233,7 +1393,7 @@ async function viewGoals(main) {
       <p class="muted">Pick something to teach ${esc(pet)}, break it into small steps, and share progress along the way.</p>
       <form data-form="goal" class="stack goal-form" novalidate>
         <label class="field"><span>Teach ${esc(pet)} to...</span><input name="title" required maxlength="80" placeholder="sit, shake paw, come when called"></label>
-        <div class="chips">${Object.keys(GOAL_TEMPLATES).map(k => `<button type="button" class="chip pick" data-action="goal-template" data-name="${k}">${cap(k)}</button>`).join('')}</div>
+        <div class="chips">${Object.keys(goalIdeas(me.petType)).map(k => `<button type="button" class="chip pick" data-action="goal-template" data-name="${esc(k)}">${esc(cap(k))}</button>`).join('')}</div>
         <label class="field"><span>Steps <small class="muted">one per line, optional</small></span><textarea name="steps" rows="4"></textarea></label>
         <div class="row wrap">
           <label class="field grow"><span>Target date <small class="muted">optional</small></span><input type="date" name="target"></label>
@@ -1251,7 +1411,7 @@ async function viewGoals(main) {
 actions['goal-template'] = el => {
   const form = el.closest('form');
   form.title.value = el.dataset.name;
-  form.steps.value = GOAL_TEMPLATES[el.dataset.name].join('\n');
+  form.steps.value = (goalIdeas(me.petType)[el.dataset.name] || []).join('\n');
   form.querySelectorAll('.chip.pick').forEach(c => c.classList.toggle('on', c === el));
 };
 
