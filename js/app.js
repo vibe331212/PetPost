@@ -166,7 +166,7 @@ async function route() {
     console.error(err);
     main.innerHTML = `<div class="card empty"><p>Something went wrong: ${esc(err.message)}</p></div>`;
   }
-  window.scrollTo(0, 0);
+  if (!main.dataset.keepScroll) window.scrollTo(0, 0);
 }
 
 function shell(active, arg) {
@@ -341,13 +341,15 @@ actions['sign-out'] = async () => {
 // ---------- posts
 function mediaEl(p, { autoplay = false } = {}) {
   const src = blobURL(p.id, p.media);
+  // Reserving the picture's shape stops the page jumping as photos load.
+  const shape = p.width && p.height ? ` style="aspect-ratio:${p.width}/${p.height}"` : '';
   if (p.mediaType === 'video') {
-    return `<video src="${src}#t=0.001" controls playsinline preload="metadata" ${autoplay ? 'autoplay' : ''} loop></video>`;
+    return `<video src="${src}#t=0.001" controls playsinline preload="metadata" ${autoplay ? 'autoplay' : ''} loop${shape}></video>`;
   }
-  return `<img src="${src}" alt="Photo shared by ${esc(p.author)}" loading="lazy">`;
+  return `<img src="${src}" alt="Photo shared by ${esc(p.author)}" loading="lazy"${shape}>`;
 }
 
-function postCard(p, author) {
+function postCard(p, author, from = 'feed') {
   author = author || { username: p.author, displayName: p.author };
   const licked = p.licks.includes(me.username);
   const saved = me.saved.includes(p.id);
@@ -367,7 +369,7 @@ function postCard(p, author) {
       <div class="media">${mediaEl(p)}<span class="lick-burst">${icon('lick')}</span></div>
       <div class="actions">
         <button class="act lick ${licked ? 'on' : ''}" data-action="lick" data-id="${p.id}" aria-pressed="${licked}">${icon('lick')}<span class="count">${n}</span><span class="lbl">${plural(n, 'Lick')}</span></button>
-        <a class="act" href="#/post/${p.id}">${icon('bark')}<span class="count bark-count">${b}</span><span class="lbl">${countLabel(b, me.petType)}</span></a>
+        <a class="act" href="#/post/${p.id}/${encodeURIComponent(from)}">${icon('bark')}<span class="count bark-count">${b}</span><span class="lbl">${countLabel(b, me.petType)}</span></a>
         <button class="act" data-action="share" data-id="${p.id}">${icon('share')}<span class="lbl">Share</span></button>
         <span class="spacer"></span>
         <button class="act" data-action="download" data-id="${p.id}" aria-label="Save to device" title="Save to device">${icon('download')}</button>
@@ -609,16 +611,25 @@ function barkRow(c, author, post) {
     </div>`;
 }
 
-async function viewPost(main, id) {
-  const p = await db.get('posts', id);
-  if (!p) { main.innerHTML = `<div class="card empty"><p>This post is no longer here.</p><a class="btn ghost" href="#/feed">Back to feed</a></div>`; return; }
-  const users = await usersMap();
-  const barks = (await db.byIndex('comments', 'postId', id)).filter(c => !blockedSet.has(c.author)).sort((a, b) => a.createdAt - b.createdAt);
+// The posts a tapped photo belongs to: a profile ("u:name"), its videos ("v:name"), your saved posts, or the home feed.
+async function postsFor(scope, post) {
+  const [kind, name] = scope.split(':');
+  let list;
+  if (kind === 'u' || kind === 'v') list = await db.byIndex('posts', 'author', name);
+  else if (kind === 'saved') list = (await Promise.all((me.saved || []).map(id => db.get('posts', id)))).filter(Boolean);
+  else {
+    const following = new Set([...(me.following || []), me.username]);
+    list = (await db.all('posts')).filter(p => feedMode() === 'all' || following.has(p.author));
+  }
+  list = list.filter(p => p.kind !== 'moment' && !blockedSet.has(p.author) && (kind !== 'v' || p.mediaType === 'video'));
+  if (kind !== 'saved') list.sort((a, b) => b.createdAt - a.createdAt);
+  return list.some(p => p.id === post.id) ? list : [post];
+}
+
+function barksSection(p, barks, users) {
   const sound = soundFor(me.petType);
-  main.innerHTML = `
-    <button class="back" data-action="back">${icon('back')}Back</button>
-    ${postCard(p, users.get(p.author))}
-    <section class="card barks">
+  return `
+    <section class="card barks" id="barks">
       <h2>${sound.words}</h2>
       <div class="bark-list">
         ${barks.length ? barks.map(c => barkRow(c, users.get(c.author), p)).join('') : `<p class="muted no-barks">No ${sound.words.toLowerCase()} yet. Start the conversation.</p>`}
@@ -629,6 +640,33 @@ async function viewPost(main, id) {
         <button class="btn primary sm">${sound.word}</button>
       </form>
     </section>`;
+}
+
+async function viewPost(main, id, from) {
+  const p = await db.get('posts', id);
+  if (!p) { main.innerHTML = `<div class="card empty"><p>This post is no longer here.</p><a class="btn ghost" href="#/feed">Back to feed</a></div>`; return; }
+  const scope = from || `u:${p.author}`;
+  const [users, list, barks] = await Promise.all([
+    usersMap(), postsFor(scope, p),
+    db.byIndex('comments', 'postId', id).then(l => l.filter(c => !blockedSet.has(c.author)).sort((a, b) => a.createdAt - b.createdAt)),
+  ]);
+  const [kind, name] = scope.split(':');
+  const owner = users.get(name);
+  const title = kind === 'saved' ? 'Saved' : kind === 'feed' || !name ? 'Home' : kind === 'v' ? `${owner?.displayName || name}'s videos` : `${owner?.displayName || name}'s posts`;
+  main.innerHTML = `
+    <div class="list-head"><button class="back" data-action="back">${icon('back')}Back</button><span class="list-title">${esc(title)}</span></div>
+    ${list.map(x => postCard(x, users.get(x.author), scope) + (x.id === id ? barksSection(x, barks, users) : '')).join('')}`;
+  // Start at the post you tapped; you can scroll up for newer posts and down for older ones.
+  main.dataset.keepScroll = '1';
+  const jump = () => {
+    const card = main.querySelector(`.post[data-post="${id}"]`);
+    if (card) window.scrollTo(0, card.getBoundingClientRect().top + window.scrollY - (document.querySelector('.topbar')?.offsetHeight || 70) - 8);
+  };
+  jump();
+  // Photos above may still be loading; settle the position once they have.
+  const above = [...main.querySelectorAll('.post')].slice(0, list.findIndex(x => x.id === id)).flatMap(c => [...c.querySelectorAll('img')]);
+  await Promise.race([Promise.all(above.map(img => img.complete ? null : new Promise(r => { img.loading = 'eager'; img.onload = img.onerror = r; }))), new Promise(r => setTimeout(r, 2500))]);
+  if (location.hash.startsWith(`#/post/${id}`)) jump();
 }
 
 forms.bark = async (form, fd) => {
@@ -873,6 +911,8 @@ forms.publish = async (form, fd) => {
     author: me.username,
     kind: isMoment ? 'moment' : draft.result.type === 'video' ? 'video' : 'photo',
     mediaType: draft.result.type,
+    width: draft.result.width || null,
+    height: draft.result.height || null,
     media: draft.result.blob,
     caption: String(fd.get('caption') || '').trim(),
     licks: [],
@@ -931,7 +971,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
       : tab === 'videos' ? posts.filter(p => p.mediaType === 'video') : posts;
     content = list.length
       ? `<div class="grid">${list.map(p => `
-          <a class="tile" href="#/post/${p.id}" aria-label="Open post">
+          <a class="tile" href="#/post/${p.id}/${encodeURIComponent(tab === 'saved' ? 'saved' : `${tab === 'videos' ? 'v' : 'u'}:${u.username}`)}" aria-label="Open post">
             ${p.mediaType === 'video'
               ? `<video src="${blobURL(p.id, p.media)}#t=0.1" muted playsinline preload="metadata"></video><span class="tile-badge">${icon('play')}</span>`
               : `<img src="${blobURL(p.id, p.media)}" alt="" loading="lazy">`}
