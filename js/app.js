@@ -205,7 +205,7 @@ function renderAuth(mode = 'signin') {
     <form data-form="signup" class="stack">
       <div class="two">
         <label class="field"><span>Your name</span><input name="displayName" autocomplete="name" maxlength="40" required></label>
-        <label class="field"><span>Username</span><input name="username" autocomplete="username" required maxlength="20" autocapitalize="off" spellcheck="false" placeholder="letters, numbers, _"></label>
+        <label class="field"><span>Username</span><input name="username" autocomplete="username" required maxlength="24" autocapitalize="off" spellcheck="false" placeholder="eli_the_goat"><small class="username-hint muted">No spaces. Letters, numbers, _ and .</small></label>
       </div>
       <div class="two">
         <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" required></label>
@@ -241,7 +241,14 @@ function soundHint(petType) {
   const s = soundFor(petType);
   return `Comments will be called ${s.words}, like "${s.word} back..."`;
 }
+document.addEventListener('input', e => {
+  if (e.target.name !== 'username' || !e.target.closest('form[data-form="signup"]')) return;
+  const cleaned = auth.cleanUsername(e.target.value);
+  const hint = e.target.parentElement.querySelector('.username-hint');
+  if (hint) hint.textContent = cleaned ? `Your username will be @${cleaned}` : 'No spaces. Letters, numbers, _ and .';
+});
 document.addEventListener('change', e => {
+  if (e.target.name === 'username' && e.target.closest('form[data-form="signup"]')) e.target.value = auth.cleanUsername(e.target.value);
   if (e.target.name !== 'petType') return;
   const hint = e.target.form?.querySelector('.sound-hint');
   if (hint) hint.textContent = soundHint(e.target.value);

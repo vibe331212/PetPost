@@ -261,11 +261,14 @@ async function loadMe(session) {
   return toUser(profile, profileCache.follows);
 }
 
-const clean = name => String(name || '').trim().toLowerCase().replace(/^@/, '');
+// "Eli the GOAT" -> "eli_the_goat": lowercase, spaces become underscores, other symbols are dropped.
+export const cleanUsername = name => String(name || '').trim().toLowerCase().replace(/^@/, '')
+  .replace(/\s+/g, '_').replace(/[^a-z0-9_.]/g, '').slice(0, 20);
+const clean = cleanUsername;
 
 export async function signUp({ username, password, displayName, petName, petType }) {
   username = clean(username);
-  if (!/^[a-z0-9_.]{3,20}$/.test(username)) throw new Error('Usernames are 3 to 20 letters, numbers, dots or underscores.');
+  if (!/^[a-z0-9_.]{3,20}$/.test(username)) throw new Error('Pick a username with at least 3 letters or numbers.');
   if (password.length < 8) throw new Error('Passwords need at least 8 characters.');
   const { data, error } = await sb.auth.signUp({ email: email(username), password });
   if (error) throw new Error(/registered|exists/i.test(error.message) ? 'That username is already taken.' : error.message);
