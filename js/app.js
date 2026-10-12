@@ -1,5 +1,6 @@
-import * as db from './db.js';
-import * as auth from './auth.js';
+// Everything is stored online (Supabase) so friends on other phones can follow each other.
+import * as db from './cloud.js';
+import * as auth from './cloud.js';
 import { processPhoto, processVideo, MAX_VIDEO_SECONDS } from './media.js';
 import { THEMES, Scene, findTheme, renderPreview } from './themes.js';
 import { icon } from './icons.js';
@@ -36,6 +37,7 @@ function ago(ts) {
 
 const blobURLs = new Map();
 function blobURL(key, blob) {
+  if (typeof blob === 'string') return blob; // already an online link
   let url = blobURLs.get(key);
   if (!url) { url = URL.createObjectURL(blob); blobURLs.set(key, url); }
   return url;
@@ -73,7 +75,8 @@ const blobToBase64 = blob => new Promise((resolve, reject) => {
 });
 
 const extFor = type => type.includes('mp4') ? 'mp4' : type.includes('webm') ? 'webm' : type.includes('png') ? 'png' : 'jpg';
-function downloadBlob(blob, name, text = '') {
+async function downloadBlob(blob, name, text = '') {
+  if (typeof blob === 'string') blob = await (await fetch(blob)).blob();
   if (Native.on) { blobToBase64(blob).then(data => Native.send({ type: 'share', data, name, text })); return; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -83,7 +86,7 @@ function downloadBlob(blob, name, text = '') {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
-const fileName = p => `petpost-${p.author}-${p.id.slice(0, 8)}.${extFor(p.media.type)}`;
+const fileName = p => `petpost-${p.author}-${p.id.slice(0, 8)}.${extFor(p.mediaMime || p.media?.type || '')}`;
 
 async function usersMap() {
   const map = new Map();
@@ -226,7 +229,7 @@ function renderAuth(mode = 'signin') {
           <button role="tab" aria-selected="${mode === 'signup'}" class="${mode === 'signup' ? 'on' : ''}" data-action="auth-mode" data-mode="signup">Create account</button>
         </div>
         ${mode === 'signin' ? signin : signup}
-        <p class="fine">${icon('shield')} <span>Your password is encrypted before it is saved. Accounts live on this device. <a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy policy</a></span></p>
+        <p class="fine">${icon('shield')} <span>Your password is encrypted. Sign in on any phone or computer to see your PetPost. <a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy policy</a></span></p>
       </div>
     </main>`;
   $app.querySelector('input')?.focus();
@@ -302,6 +305,7 @@ async function withBusy(form, fn) {
 
 forms.signin = (form, fd) => withBusy(form, async () => {
   me = await auth.signIn(fd.get('username'), fd.get('password'));
+  await refreshBlocked();
   syncNativeCare();
   applyTheme(me.theme);
   go('#/feed');
@@ -318,8 +322,8 @@ forms.signup = (form, fd) => withBusy(form, async () => {
   go('#/feed');
 });
 
-actions['sign-out'] = () => {
-  auth.signOut();
+actions['sign-out'] = async () => {
+  await auth.signOut();
   me = null;
   syncNativeCare();
   applyTheme('clean');
@@ -350,7 +354,8 @@ function postCard(p, author) {
           <a href="#/profile/${esc(author.username)}" class="name">${esc(author.displayName)}</a>
           <span class="sub">@${esc(author.username)}${author.petName ? ` · ${esc(author.petName)}` : ''} · ${ago(p.createdAt)}</span>
         </div>
-        ${own ? `<button class="icon-btn" data-action="delete-post" data-id="${p.id}" aria-label="Delete post">${icon('trash')}</button>` : ''}
+        ${own ? `<button class="icon-btn" data-action="delete-post" data-id="${p.id}" aria-label="Delete post">${icon('trash')}</button>`
+              : `<button class="icon-btn" data-action="report" data-post="${p.id}" data-user="${esc(p.author)}" aria-label="Report post" title="Report">${icon('flag')}</button>`}
       </header>
       <div class="media">${mediaEl(p)}<span class="lick-burst">${icon('lick')}</span></div>
       <div class="actions">
@@ -404,13 +409,14 @@ actions.share = async el => {
   if (!p) return;
   const text = p.caption || `A post from @${p.author} on PetPost`;
   if (Native.on) return downloadBlob(p.media, fileName(p), text);
-  const file = new File([p.media], fileName(p), { type: p.media.type });
+  const blob = typeof p.media === 'string' ? await (await fetch(p.media)).blob() : p.media;
+  const file = new File([blob], fileName(p), { type: blob.type });
   const data = { title: 'PetPost', text, files: [file] };
   if (navigator.canShare?.(data)) {
     try { await navigator.share(data); }
     catch (err) { if (err.name !== 'AbortError') toast('Sharing did not work. Try saving it instead.'); }
   } else {
-    downloadBlob(p.media, fileName(p));
+    downloadBlob(blob, fileName(p));
     toast('This browser cannot share files, so it was saved to your device to share from there.');
   }
 };
@@ -439,11 +445,12 @@ async function viewFeed(main) {
   const [posts, users] = await Promise.all([db.all('posts'), usersMap()]);
   const now = Date.now();
   const following = new Set([...(me.following || []), me.username]);
+  posts.splice(0, posts.length, ...posts.filter(p => !blockedSet.has(p.author)));
   const mode = feedMode();
   const feed = posts.filter(p => p.kind !== 'moment' && (mode === 'all' || following.has(p.author))).sort((a, b) => b.createdAt - a.createdAt);
 
   // clean up expired moments
-  posts.filter(p => p.kind === 'moment' && p.expiresAt <= now).forEach(p => deletePost(p.id));
+  posts.filter(p => p.kind === 'moment' && p.expiresAt <= now && p.author === me.username).forEach(p => deletePost(p.id));
 
   const groups = new Map();
   posts.filter(p => p.kind === 'moment' && p.expiresAt > now)
@@ -599,7 +606,7 @@ async function viewPost(main, id) {
   const p = await db.get('posts', id);
   if (!p) { main.innerHTML = `<div class="card empty"><p>This post is no longer here.</p><a class="btn ghost" href="#/feed">Back to feed</a></div>`; return; }
   const users = await usersMap();
-  const barks = (await db.byIndex('comments', 'postId', id)).sort((a, b) => a.createdAt - b.createdAt);
+  const barks = (await db.byIndex('comments', 'postId', id)).filter(c => !blockedSet.has(c.author)).sort((a, b) => a.createdAt - b.createdAt);
   const sound = soundFor(me.petType);
   main.innerHTML = `
     <button class="back" data-action="back">${icon('back')}Back</button>
@@ -933,7 +940,8 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
           <button class="btn ghost" data-action="pet-card" data-user="${esc(u.username)}">${icon('card')}Pet card</button>
           <button class="btn ghost" data-action="sign-out">${icon('logout')}Sign out</button>` : `
           <button class="btn ${iFollow ? 'ghost' : 'primary'}" data-action="follow" data-user="${esc(u.username)}">${icon(iFollow ? 'check' : 'userPlus')}${iFollow ? 'Following' : 'Follow'}</button>
-          <button class="btn ghost" data-action="pet-card" data-user="${esc(u.username)}">${icon('card')}Pet card</button>`}
+          <button class="btn ghost" data-action="pet-card" data-user="${esc(u.username)}">${icon('card')}Pet card</button>
+          <button class="icon-btn" data-action="report" data-user="${esc(u.username)}" aria-label="Report or block @${esc(u.username)}" title="Report or block">${icon('more')}</button>`}
       </div>
     </section>
     <nav class="tabs">${tabLink('posts', 'Posts')}${tabLink('videos', 'Videos')}${own ? tabLink('saved', 'Saved') : ''}${tabLink('goals', 'Goals')}${tabLink('trophies', 'Trophies')}</nav>
@@ -974,7 +982,7 @@ actions['edit-profile'] = () => {
       <details class="danger-zone">
         <summary>Delete account</summary>
         <div class="stack pad-top">
-          <p class="muted small">This erases your account and everything in it on this device: posts, moments, comments, goals, trophies and care needs. It cannot be undone.</p>
+          <p class="muted small">This erases your account and everything in it: posts, moments, photos, videos, comments, goals, trophies and care needs. It cannot be undone.</p>
           <button type="button" class="btn ghost danger" data-action="delete-account">${icon('trash')}Delete my account</button>
         </div>
       </details>
@@ -994,24 +1002,14 @@ actions['edit-profile'] = () => {
 actions['delete-account'] = async el => {
   if (!confirm(`Delete @${me.username} and everything in it? This cannot be undone.`)) return;
   el.disabled = true;
-  const name = me.username;
-  const [posts, comments, goals] = await Promise.all([db.all('posts'), db.all('comments'), db.byIndex('goals', 'owner', name)]);
-  for (const p of posts) {
-    if (p.author === name) { await deletePost(p.id); continue; }
-    if (p.licks.includes(name)) { p.licks = p.licks.filter(u => u !== name); await db.put('posts', p); }
+  try {
+    await auth.deleteAccount();
+  } catch (err) {
+    el.disabled = false;
+    toast(`Could not delete the account: ${err.message}`);
+    return;
   }
-  for (const c of comments.filter(c => c.author === name)) {
-    await db.del('comments', c.id);
-    const p = await db.get('posts', c.postId);
-    if (p) { p.barkCount = Math.max(0, (p.barkCount || 1) - 1); await db.put('posts', p); }
-  }
-  await Promise.all(goals.map(g => db.del('goals', g.id)));
-  for (const other of await db.all('users')) {
-    if ((other.following || []).includes(name)) { other.following = other.following.filter(n => n !== name); await db.put('users', other); }
-  }
-  await db.del('users', name);
   el.closest('dialog')?.close();
-  auth.signOut();
   me = null;
   syncNativeCare();
   applyTheme('clean');
@@ -1046,7 +1044,7 @@ forms.profile = (form, fd) => withBusy(form, async () => {
 });
 
 // ---------- people and following
-// Everyone with an account in PetPost on this device. (Following friends on other phones would need an online database.)
+// Everyone on PetPost, on any phone or computer.
 async function viewPeople(main) {
   const users = (await db.all('users')).filter(u => u.username !== me.username).sort((a, b) => a.displayName.localeCompare(b.displayName));
   main.innerHTML = `
@@ -1057,7 +1055,7 @@ async function viewPeople(main) {
     </section>
     <section class="card people-card">
       ${users.length ? `<ul class="people">${users.map(personRow).join('')}</ul>` : `
-        <div class="empty">${icon('users', 'big')}<p class="muted">No one else is on PetPost on this device yet. When someone makes an account here, they show up in this list.</p></div>`}
+        <div class="empty">${icon('users', 'big')}<p class="muted">No one else is on PetPost yet. Send your friends the link so they can join and follow you.</p></div>`}
     </section>`;
   main.querySelector('.people-search').addEventListener('input', e => {
     const q = e.target.value.trim().toLowerCase();
@@ -1108,6 +1106,50 @@ actions['follow-list'] = async el => {
   document.body.append(d);
   d.addEventListener('close', () => d.remove());
   d.showModal();
+};
+
+// ---------- report and block (people who share posts with each other need a way to stay safe)
+let blockedSet = new Set();
+async function refreshBlocked() {
+  try { blockedSet = new Set(await db.blocked()); } catch { /* offline: keep the last list */ }
+}
+
+actions.report = el => {
+  const post = el.dataset.post || null, user = el.dataset.user;
+  const isBlocked = blockedSet.has(user);
+  const d = document.createElement('dialog');
+  d.className = 'modal report-modal';
+  d.innerHTML = `
+    <header class="row"><h2>${post ? 'Report this post' : `@${esc(user)}`}</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
+    <p class="muted">${post ? 'Why are you reporting it? The people who run PetPost will take a look.' : 'Report this account, or block it so you no longer see each other’s posts.'}</p>
+    <div class="stack pad-top report-reasons">
+      ${['Spam', 'Mean or bullying', 'Not appropriate', 'Hurting an animal', 'Something else'].map(r => `<button type="button" class="btn ghost block" data-action="report-send" data-reason="${r}">${icon('flag')}${r}</button>`).join('')}
+      <button type="button" class="btn ghost block danger" data-action="block-toggle" data-user="${esc(user)}">${icon('block')}${isBlocked ? `Unblock @${esc(user)}` : `Block @${esc(user)}`}</button>
+    </div>`;
+  d.dataset.post = post || '';
+  d.dataset.user = user;
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+};
+
+actions['report-send'] = async el => {
+  const d = el.closest('dialog');
+  try {
+    await db.report({ postId: d.dataset.post || null, username: d.dataset.user, reason: el.dataset.reason });
+    d.close();
+    toast('Thanks. Your report was sent.');
+  } catch (err) { toast(`Could not send the report: ${err.message}`); }
+};
+
+actions['block-toggle'] = async el => {
+  const user = el.dataset.user, on = !blockedSet.has(user);
+  if (on && !confirm(`Block @${user}? You won't see their posts or comments, and you'll stop following them.`)) return;
+  await db.setBlocked(user, on);
+  if (on) { me.following = (me.following || []).filter(n => n !== user); blockedSet.add(user); } else blockedSet.delete(user);
+  el.closest('dialog').close();
+  toast(on ? `Blocked @${user}` : `Unblocked @${user}`);
+  route();
 };
 
 // ---------- notifications
@@ -2040,12 +2082,14 @@ actions.install = async () => {
 (async function boot() {
   try {
     me = await auth.currentUser();
+    if (me) await refreshBlocked();
   } catch (err) {
     console.error(err);
   }
   applyTheme(me?.theme || 'clean');
   addEventListener('hashchange', route);
-  route();
+  await route();
+  $app.dataset.started = '1';
   syncNativeCare();
   if ('serviceWorker' in navigator && !Native.on) setUpUpdates();
 })();

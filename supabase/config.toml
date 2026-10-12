@@ -1,0 +1,9 @@
+project_id = "petpost"
+
+[auth]
+site_url = "https://vibe331212.github.io/PetPost/"
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false

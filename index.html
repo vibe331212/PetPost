@@ -21,6 +21,30 @@
 <body data-tone="light">
   <canvas id="scene" aria-hidden="true"></canvas>
   <div id="app"></div>
+  <script>
+    // If PetPost can't start (an old saved copy, or no connection), show a way out instead of a blank page.
+    (function () {
+      function rescue(detail) {
+        var app = document.getElementById('app');
+        if (!app || app.dataset.started || document.getElementById('rescue')) return;
+        app.innerHTML = '<main id="rescue" style="min-height:100vh;display:grid;place-items:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center">'
+          + '<div style="max-width:360px;background:#fff;border-radius:20px;padding:28px 22px;box-shadow:0 8px 28px rgba(0,0,0,.12)">'
+          + '<h1 style="font-size:22px;margin:0 0 8px">PetPost could not load</h1>'
+          + '<p style="color:#5c6472;margin:0 0 18px">Check your internet connection, then tap the button. Your account and posts are safe.</p>'
+          + '<button id="rescue-btn" style="border:0;border-radius:999px;background:#3b5bfd;color:#fff;font:inherit;font-weight:600;padding:12px 22px">Fix and reload</button>'
+          + (detail ? '<p style="color:#9aa1ad;font-size:12px;margin-top:14px">' + String(detail).replace(/[<>&]/g, '') + '</p>' : '')
+          + '</div></main>';
+        document.getElementById('rescue-btn').onclick = async function () {
+          try { var regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(function (r) { return r.unregister(); })); } catch (e) {}
+          try { var keys = await caches.keys(); await Promise.all(keys.map(function (k) { return caches.delete(k); })); } catch (e) {}
+          location.replace(location.pathname + '?fresh=' + Date.now());
+        };
+      }
+      window.addEventListener('error', function (e) { if (!document.getElementById('app').dataset.started) rescue(e.message); });
+      window.addEventListener('unhandledrejection', function (e) { if (!document.getElementById('app').dataset.started) rescue(e.reason && e.reason.message); });
+      setTimeout(function () { rescue(''); }, 12000);
+    })();
+  </script>
   <div id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="js/app.js"></script>
 </body>

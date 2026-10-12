@@ -20,13 +20,16 @@ export function trickName(title) {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-function loadImage(blob) {
+function loadImage(source) {
   return new Promise(resolve => {
-    if (!blob) return resolve(null);
-    const url = URL.createObjectURL(blob);
+    if (!source) return resolve(null);
+    const online = typeof source === 'string';
+    const url = online ? source : URL.createObjectURL(source);
     const img = new Image();
-    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    if (online) img.crossOrigin = 'anonymous'; // lets the photo be drawn into the shareable picture
+    const done = ok => { if (!online) URL.revokeObjectURL(url); resolve(ok ? img : null); };
+    img.onload = () => done(true);
+    img.onerror = () => done(false);
     img.src = url;
   });
 }

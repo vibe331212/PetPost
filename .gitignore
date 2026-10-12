@@ -2,3 +2,8 @@
 .DS_Store
 ios/build/
 ios/**/xcuserdata/
+
+# Supabase local secrets
+supabase/.temp/
+supabase/.branches/
+*.local.txt

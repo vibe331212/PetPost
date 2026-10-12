@@ -1,16 +1,16 @@
 // Service worker: lets PetPost open and run without an internet connection.
 // Bump VERSION whenever app files change so phones pick up the update.
-const VERSION = 'petpost-v14';
+const VERSION = 'petpost-v15';
 const SHELL = [
   './',
   './index.html',
   './styles.css',
   './manifest.webmanifest',
   './js/app.js',
-  './js/auth.js',
   './js/camera.js',
   './js/celebrate.js',
-  './js/db.js',
+  './js/cloud.js',
+  './js/config.js',
   './js/icons.js',
   './js/media.js',
   './js/petcard.js',
@@ -40,8 +40,8 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // Fonts never change: serve from cache once we have them.
-  if (url.hostname.endsWith('fonts.googleapis.com') || url.hostname.endsWith('fonts.gstatic.com')) {
+  // Fonts and the pinned database library never change: serve from cache once we have them.
+  if (url.hostname.endsWith('fonts.googleapis.com') || url.hostname.endsWith('fonts.gstatic.com') || url.hostname === 'esm.sh') {
     event.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => {
       const copy = res.clone();
       caches.open(VERSION).then(c => c.put(req, copy));
