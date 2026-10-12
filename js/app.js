@@ -633,18 +633,34 @@ async function viewPost(main, id) {
 
 forms.bark = async (form, fd) => {
   const text = String(fd.get('text') || '').trim();
-  if (!text) return;
-  const p = await db.get('posts', form.dataset.id);
-  if (!p) return;
-  const c = { id: db.uid(), postId: p.id, author: me.username, text, createdAt: Date.now() };
-  await db.put('comments', c);
-  p.barkCount = (p.barkCount || 0) + 1;
-  await db.put('posts', p);
-  form.reset();
-  document.querySelector('.no-barks')?.remove();
-  document.querySelector('.bark-list').insertAdjacentHTML('beforeend', barkRow(c, me, p));
-  updateBarkCount(p);
+  // Sending takes a moment online; ignore extra taps or Enter presses until it's done.
+  if (!text || form.dataset.sending) return;
+  form.dataset.sending = '1';
+  const btn = form.querySelector('button');
+  btn.disabled = true;
+  try {
+    await db.put('comments', { id: db.uid(), postId: form.dataset.id, author: me.username, text, createdAt: Date.now() });
+    form.reset();
+    await refreshBarks(form.dataset.id);
+  } catch (err) {
+    toast(`Could not send it: ${err.message}`);
+  } finally {
+    delete form.dataset.sending;
+    btn.disabled = false;
+  }
 };
+
+// Redraw the comments from what's actually saved, so nothing shows up twice.
+async function refreshBarks(postId) {
+  const [p, list, users] = await Promise.all([db.get('posts', postId), db.byIndex('comments', 'postId', postId), usersMap()]);
+  if (!p) return;
+  const barks = list.filter(c => !blockedSet.has(c.author)).sort((a, b) => a.createdAt - b.createdAt);
+  const box = document.querySelector('.bark-list');
+  if (box) box.innerHTML = barks.length ? barks.map(c => barkRow(c, users.get(c.author), p)).join('')
+    : `<p class="muted no-barks">No ${soundFor(me.petType).words.toLowerCase()} yet. Start the conversation.</p>`;
+  p.barkCount = list.length;
+  updateBarkCount(p);
+}
 
 function updateBarkCount(p) {
   const card = document.querySelector(`.post[data-post="${p.id}"]`);
@@ -654,10 +670,10 @@ function updateBarkCount(p) {
 }
 
 actions['delete-bark'] = async el => {
+  if (el.disabled) return;
+  el.disabled = true;
   await db.del('comments', el.dataset.id);
-  const p = await db.get('posts', el.dataset.post);
-  if (p) { p.barkCount = Math.max(0, (p.barkCount || 1) - 1); await db.put('posts', p); updateBarkCount(p); }
-  el.closest('.bark').remove();
+  await refreshBarks(el.dataset.post);
 };
 
 // ---------- create
