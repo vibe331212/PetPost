@@ -16,14 +16,17 @@ const SOUNDS = [
   { match: /fish/, word: 'Blub', words: 'Blubs', past: 'blubbed' },
   { match: /snake|reptile|lizard|turtle|tortoise|gecko/, word: 'Hiss', words: 'Hisses', past: 'hissed' },
   { match: /frog|toad/, word: 'Ribbit', words: 'Ribbits', past: 'ribbited' },
+  // "Other" pets get plain words, since we don't know what sound they make.
+  { match: /^other$/, word: 'Comment', words: 'Comments', past: 'commented', prompt: 'Write a comment...', sticker: 'Hello' },
 ];
 const DEFAULT = { word: 'Bark', words: 'Barks', past: 'barked' };
 
 export const PET_TYPES = ['Dog', 'Cat', 'Horse', 'Bird', 'Rabbit', 'Hamster', 'Guinea pig', 'Fish', 'Reptile', 'Cow', 'Pig', 'Sheep', 'Goat', 'Duck', 'Chicken', 'Frog', 'Other'];
 
 export function soundFor(petType) {
-  const t = String(petType || '').toLowerCase();
-  return SOUNDS.find(s => s.match.test(t)) || DEFAULT;
+  const t = String(petType || '').trim().toLowerCase();
+  const s = SOUNDS.find(s => s.match.test(t)) || DEFAULT;
+  return { prompt: `${s.word} back...`, sticker: s.word, ...s };
 }
 
 export const countLabel = (n, petType) => (n === 1 ? soundFor(petType).word : soundFor(petType).words);

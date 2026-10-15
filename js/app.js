@@ -240,7 +240,7 @@ actions['auth-mode'] = el => renderAuth(el.dataset.mode);
 
 function soundHint(petType) {
   const s = soundFor(petType);
-  return `Comments will be called ${s.words}, like "${s.word} back..."`;
+  return s.word === 'Comment' ? 'Comments will just be called Comments.' : `Comments will be called ${s.words}, like "${s.prompt}"`;
 }
 document.addEventListener('input', e => {
   if (e.target.name !== 'username' || !e.target.closest('form[data-form="signup"]')) return;
@@ -637,7 +637,7 @@ function barksSection(p, barks, users) {
       </div>
       <form data-form="bark" data-id="${p.id}" class="bark-form">
         ${avatar(me, 'sm')}
-        <input name="text" maxlength="400" placeholder="${sound.word} back..." required autocomplete="off" aria-label="Write a comment">
+        <input name="text" maxlength="400" placeholder="${sound.prompt}" required autocomplete="off" aria-label="Write a comment">
         <button class="btn primary sm">${sound.word}</button>
       </form>
     </section>`;
@@ -892,7 +892,7 @@ function showResult(root) {
 
 actions.stickers = async () => {
   if (!draft?.baseBlob || draft.busy) return;
-  const out = await openStickerEditor(draft.baseBlob, draft.stickers, soundFor(me.petType).word);
+  const out = await openStickerEditor(draft.baseBlob, draft.stickers, soundFor(me.petType).sticker);
   if (!out || !draft) return;
   draft.stickers = out.stickers;
   draft.result = { ...draft.result, blob: out.blob };
