@@ -204,16 +204,16 @@ function renderAuth(mode = 'signin') {
   const signup = `
     <form data-form="signup" class="stack">
       <div class="two">
-        <label class="field"><span>Your name</span><input name="displayName" autocomplete="name" maxlength="40" required></label>
-        <label class="field"><span>Username</span><input name="username" autocomplete="username" required maxlength="24" autocapitalize="off" spellcheck="false" placeholder="eli_the_goat"><small class="username-hint muted">No spaces. Letters, numbers, _ and .</small></label>
+        <label class="field"><span>Your name</span><input name="displayName" autocomplete="name" maxlength="40" required placeholder="Sam"><small class="muted">Your own name. Shown in bold on your posts.</small></label>
+        <label class="field"><span>Username</span><input name="username" autocomplete="username" required maxlength="24" autocapitalize="off" spellcheck="false" placeholder="sam_and_biscuit"><small class="username-hint muted">Shown as @username on your posts. No spaces.</small></label>
       </div>
       <div class="two">
-        <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" required></label>
+        <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" required placeholder="Biscuit"><small class="muted">Shown after your @username</small></label>
         <label class="field"><span>Pet type</span>
           <select name="petType">${PET_TYPES.map(t => `<option>${t}</option>`).join('')}</select>
+          <small class="sound-hint muted">${soundHint('Dog')}</small>
         </label>
       </div>
-      <p class="sound-hint muted small">${soundHint('Dog')}</p>
       <label class="field"><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters"></label>
       <label class="field"><span>Confirm password</span><input name="confirm" type="password" autocomplete="new-password" minlength="8" required></label>
       <p class="form-error" role="alert"></p>
@@ -245,7 +245,7 @@ document.addEventListener('input', e => {
   if (e.target.name !== 'username' || !e.target.closest('form[data-form="signup"]')) return;
   const cleaned = auth.cleanUsername(e.target.value);
   const hint = e.target.parentElement.querySelector('.username-hint');
-  if (hint) hint.textContent = cleaned ? `Your username will be @${cleaned}` : 'No spaces. Letters, numbers, _ and .';
+  if (hint) hint.textContent = cleaned ? `Your username will be @${cleaned}` : 'Shown as @username on your posts. No spaces.';
 });
 document.addEventListener('change', e => {
   if (e.target.name === 'username' && e.target.closest('form[data-form="signup"]')) e.target.value = auth.cleanUsername(e.target.value);
@@ -1020,11 +1020,10 @@ actions['edit-profile'] = () => {
       <header class="row"><h2>Edit profile</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
       <div class="avatar-edit">${avatar(me, 'xl')}<label class="btn ghost sm">${icon('photo')}Change photo<input type="file" name="avatar" accept="image/*" hidden></label></div>
       <div class="two">
-        <label class="field"><span>Your name</span><input name="displayName" maxlength="40" value="${esc(me.displayName)}" required></label>
-        <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" value="${esc(me.petName)}"></label>
+        <label class="field"><span>Your name</span><input name="displayName" maxlength="40" value="${esc(me.displayName)}" required><small class="muted">Your own name. Shown in bold on your posts.</small></label>
+        <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" value="${esc(me.petName)}"><small class="muted">Shown after your @username</small></label>
       </div>
-      <label class="field"><span>Pet type</span><select name="petType">${[...new Set([...PET_TYPES, me.petType].filter(Boolean))].map(t => `<option ${t === me.petType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
-      <p class="sound-hint muted small">${soundHint(me.petType)}</p>
+      <label class="field"><span>Pet type</span><select name="petType">${[...new Set([...PET_TYPES, me.petType].filter(Boolean))].map(t => `<option ${t === me.petType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><small class="sound-hint muted">${soundHint(me.petType)}</small></label>
       <label class="field"><span>Bio</span><textarea name="bio" maxlength="200" rows="3">${esc(me.bio)}</textarea></label>
       <h3 class="form-section">Pet card</h3>
       <div class="two">
