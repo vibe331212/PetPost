@@ -272,7 +272,7 @@ async function loadMe(session) {
   return toUser(profile, profileCache.follows);
 }
 
-// "Eli the GOAT" -> "eli_the_goat": lowercase, spaces become underscores, other symbols are dropped.
+// "Sam and Biscuit" -> "sam_and_biscuit": lowercase, spaces become underscores, other symbols are dropped.
 export const cleanUsername = name => String(name || '').trim().toLowerCase().replace(/^@/, '')
   .replace(/\s+/g, '_').replace(/[^a-z0-9_.]/g, '').slice(0, 20);
 const clean = cleanUsername;
