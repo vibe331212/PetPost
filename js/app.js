@@ -153,7 +153,7 @@ async function route() {
   if (!me) return renderAuth();
   if (!me.cameraAsked) return renderPermission();
   const [view = 'feed', a, b] = parts();
-  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople, notifications: viewNotifications };
+  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople, notifications: viewNotifications, reports: viewReports };
   const fn = views[view] || viewFeed;
   if (draft && view !== 'create') resetDraft();
   shell(views[view] ? view : 'feed', a);
@@ -189,6 +189,7 @@ function shell(active, arg) {
       ${tab('create', 'plus', 'Post', '#/create')}
       ${tab('care', 'care', 'Care', '#/care')}
       ${tab('profile', 'user', 'Profile', `#/profile/${me.username}`, active === 'profile' && (!arg || arg === me.username))}
+      ${db.isAdmin() ? tab('reports', 'flag', 'Reports', '#/reports') : ''}
     </nav>`;
 }
 
@@ -1206,7 +1207,7 @@ actions['report-send'] = async el => {
 
 actions['block-toggle'] = async el => {
   const user = el.dataset.user, on = !blockedSet.has(user);
-  if (on && !confirm(`Block @${user}? You won't see their posts or comments, and you'll stop following them.`)) return;
+  if (on && !confirm(`Block @${user}? You won't see each other's posts or comments, and you'll both stop following each other.`)) return;
   await db.setBlocked(user, on);
   if (on) { me.following = (me.following || []).filter(n => n !== user); blockedSet.add(user); } else blockedSet.delete(user);
   el.closest('dialog').close();
@@ -1287,6 +1288,69 @@ async function viewNotifications(main) {
   await saveMe();
   updateBell();
 }
+
+// ---------- reports (only admins see this tab)
+let reportGroups = [];
+async function viewReports(main) {
+  if (!db.isAdmin()) { main.innerHTML = `<div class="card empty"><p>Only people who run PetPost can see reports.</p></div>`; return; }
+  // One card per reported post (or per reported account), with every report about it.
+  const groups = new Map();
+  for (const r of await db.adminReports()) {
+    const key = r.post ? `post:${r.post.id}` : `user:${r.reportedUser || 'unknown'}`;
+    if (!groups.has(key)) groups.set(key, { post: r.post, user: r.post?.author || r.reportedUser, reports: [] });
+    groups.get(key).reports.push(r);
+  }
+  reportGroups = [...groups.values()];
+  const media = p => !p.media ? '' : p.mediaType === 'video'
+    ? `<video src="${esc(p.media)}" controls playsinline preload="metadata"></video>`
+    : `<img src="${esc(p.media)}" alt="Reported post" loading="lazy">`;
+  main.innerHTML = `
+    <section class="card">
+      <h1>Reports</h1>
+      <p class="muted">Posts and accounts people reported. Dismiss a report once you have looked at it, or remove the post.</p>
+    </section>
+    ${reportGroups.length ? reportGroups.map((g, i) => `
+      <section class="card report-group">
+        <header class="row">
+          <h2>${g.post ? 'Post by' : 'Account'} <a href="#/profile/${esc(g.user)}">@${esc(g.user || 'deleted account')}</a></h2>
+          <span class="spacer"></span>
+          <span class="report-count">${g.reports.length} ${plural(g.reports.length, 'report')}</span>
+        </header>
+        ${g.post ? `
+          <div class="report-post">
+            ${media(g.post)}
+            ${g.post.caption ? `<p>${esc(g.post.caption)}</p>` : ''}
+            <p class="muted small">${g.post.kind === 'moment' ? 'Moment' : g.post.mediaType === 'video' ? 'Video' : 'Photo'} posted ${ago(g.post.createdAt)}</p>
+          </div>` : ''}
+        <ul class="report-list">
+          ${g.reports.map(r => `<li><strong>${esc(r.reason)}</strong><span class="muted small">by @${esc(r.reporter || 'deleted account')} · ${ago(r.createdAt)}</span></li>`).join('')}
+        </ul>
+        <div class="row wrap">
+          <button class="btn ghost sm" data-action="dismiss-reports" data-group="${i}">${icon('check')}Dismiss</button>
+          ${g.post ? `<button class="btn ghost sm danger" data-action="remove-reported-post" data-group="${i}">${icon('trash')}Remove post</button>` : ''}
+        </div>
+      </section>`).join('') : `
+      <section class="card empty">${icon('flag', 'big')}<h2>No reports</h2><p class="muted">When someone reports a post or an account, it shows up here.</p></section>`}`;
+}
+
+actions['dismiss-reports'] = async el => {
+  const g = reportGroups[el.dataset.group];
+  try {
+    await db.dismissReports(g.reports.map(r => r.id));
+    toast('Report dismissed');
+    route();
+  } catch (err) { toast(`Could not dismiss it: ${err.message}`); }
+};
+
+actions['remove-reported-post'] = async el => {
+  const g = reportGroups[el.dataset.group];
+  if (!confirm(`Remove this post by @${g.user}? This cannot be undone.`)) return;
+  try {
+    await db.adminDeletePost(g.post.id);
+    toast('Post removed');
+    route();
+  } catch (err) { toast(`Could not remove it: ${err.message}`); }
+};
 
 // ---------- pet card
 async function petCard(u) {

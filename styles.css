@@ -663,3 +663,13 @@ body::before {
 .list-head .back { margin: 0; }
 .list-title { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 8px var(--bg); }
 .media img[style*="aspect-ratio"], .media video[style*="aspect-ratio"] { height: auto; }
+
+/* ---------- reports (admins) */
+.report-group { display: flex; flex-direction: column; gap: 12px; }
+.report-group h2 { font-size: 17px; margin: 0; }
+.report-count { font-size: 13px; font-weight: 600; color: #e5484d; }
+.report-post img, .report-post video { width: 100%; max-height: 420px; object-fit: contain; background: #000; border-radius: 12px; display: block; }
+.report-post p { margin: 8px 0 0; }
+.report-list { list-style: none; margin: 0; padding: 0; }
+.report-list li { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
+.report-list li + li { border-top: 1px solid var(--line); }

@@ -23,6 +23,8 @@ function check({ data, error }) {
   if (error) {
     // The account was deleted while this device was still signed in to it.
     if (/(private_data|profiles)_id_fkey|User from sub claim in JWT does not exist/i.test(error.message || '')) accountGone();
+    // Licking, commenting on or following someone you blocked, or who blocked you.
+    if (/row-level security policy for table "(licks|comments|follows)"/i.test(error.message || '')) throw new Error('That post or account is not available.');
     throw new Error(error.message || 'Something went wrong talking to PetPost');
   }
   return data;
@@ -38,6 +40,7 @@ function accountGone() {
 let myId = null;
 let myName = null;
 let privateCache = {};
+let amAdmin = false;
 
 // ---------- profiles (cached briefly, since almost every screen needs them)
 let profileCache = null;
@@ -250,6 +253,7 @@ export async function setBlocked(username, on) {
   const id = idOf(username);
   if (!id) return;
   if (on) {
+    // The database also stops them following you.
     check(await sb.from('blocks').upsert({ blocker: myId, blocked: id }, { onConflict: 'blocker,blocked', ignoreDuplicates: true }));
     await sb.from('follows').delete().eq('follower', myId).eq('followee', id);
   } else {
@@ -258,16 +262,38 @@ export async function setBlocked(username, on) {
   invalidate();
 }
 
+// ---------- admins (people who run PetPost and look at reports)
+export const isAdmin = () => amAdmin;
+export async function adminReports() {
+  return check(await sb.rpc('admin_reports')).map(r => ({
+    id: r.id, reason: r.reason, createdAt: ms(r.created_at),
+    reporter: r.reporter, reportedUser: r.reported_user,
+    post: r.post_id ? {
+      id: r.post_id, author: r.post_author, ...r.post_data,
+      media: mediaUrl(r.post_data?.mediaPath), createdAt: ms(r.post_created_at),
+    } : null,
+  }));
+}
+export async function dismissReports(ids) {
+  check(await sb.from('reports').delete().in('id', ids));
+}
+export async function adminDeletePost(postId) {
+  check(await sb.rpc('admin_delete_post', { target: postId }));
+}
+
 // ---------- accounts
 async function loadMe(session) {
   myId = session.user.id;
-  const [profile, priv] = await Promise.all([
+  const [profile, priv, admin] = await Promise.all([
     sb.from('profiles').select('id,username,data,created_at').eq('id', myId).maybeSingle().then(check),
     sb.from('private_data').select('data').eq('id', myId).maybeSingle().then(check),
+    // Before the admins table exists this just fails, which means "not an admin".
+    sb.from('admins').select('user_id').eq('user_id', myId).maybeSingle(),
   ]);
   if (!profile) return null;
   myName = profile.username;
   privateCache = priv?.data || {};
+  amAdmin = !!admin.data;
   await loadProfiles(true);
   return toUser(profile, profileCache.follows);
 }
@@ -308,7 +334,7 @@ export async function changePassword(user, current, next) {
 }
 
 export async function signOut() {
-  myId = null; myName = null; privateCache = {}; profileCache = null;
+  myId = null; myName = null; privateCache = {}; profileCache = null; amAdmin = false;
   await sb.auth.signOut().catch(() => {});
 }
 
