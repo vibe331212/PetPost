@@ -817,3 +817,13 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .highlight .ring img, .highlight .ring video { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 2px solid var(--surface-solid); display: block; }
 .highlight .mb-name { font-size: 12px; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notif-ic.moment-reaction { background: #ff922b; } .notif-ic.moment-vote { background: #2fbf71; } .notif-ic.moment-answer { background: #3b5bfd; }
+
+/* Streak bar on profiles */
+.profile-streak { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin: 2px 0 8px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.ps-flame { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--surface-solid); color: var(--muted); flex: none; }
+.ps-flame .ic { width: 22px; height: 22px; }
+.profile-streak.lit .ps-flame { background: linear-gradient(160deg, #ffb547, #ff5a36); color: #fff; }
+.ps-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ps-text strong { font-size: 15px; }
+.ps-best { display: flex; flex-direction: column; align-items: center; flex: none; }
+.ps-best strong { font-size: 17px; }

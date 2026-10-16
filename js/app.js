@@ -1618,6 +1618,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
         <button data-action="follow-list" data-user="${esc(u.username)}" data-kind="following"><strong>${followingCount}</strong><span>Following</span></button>
         <div><strong>${trophies.length}</strong><span>${trophies.length === 1 ? 'Trophy' : 'Trophies'}</span></div>
       </div>
+      ${profileStreak(u, own)}
       <div class="row wrap profile-actions">
         ${own ? `
           <button class="btn ghost" data-action="edit-profile">${icon('edit')}Edit profile</button>
@@ -2364,6 +2365,7 @@ function streakStats(days = []) {
   let cursor = set.has(dayKey(today)) ? today : shiftDay(today, -1);
   let current = 0;
   while (set.has(dayKey(cursor))) { current++; cursor = shiftDay(cursor, -1); }
+  const start = current ? shiftDay(cursor, 1) : null; // the first day of the streak going on now
   let best = 0, run = 0, prev = null;
   for (const k of [...set].sort()) {
     const d = new Date(`${k}T12:00:00`);
@@ -2371,7 +2373,7 @@ function streakStats(days = []) {
     best = Math.max(best, run);
     prev = d;
   }
-  return { current, best, today: set.has(dayKey(today)) };
+  return { current, best, start, today: set.has(dayKey(today)) };
 }
 
 function streakCard() {
@@ -2405,6 +2407,25 @@ function streakCard() {
 function refreshStreakCard() {
   const slot = document.querySelector('.streak-slot');
   if (slot) slot.innerHTML = streakCard();
+}
+
+// The streak bar on a profile: how long the streak is, when it started, and the best one.
+function profileStreak(u, own) {
+  const { current, best, start } = streakStats(u.practiceDays);
+  const who = own ? 'You' : esc(u.displayName || u.username);
+  const pet = esc(u.petName || (own ? 'your pet' : 'their pet'));
+  const started = start && (dayKey(start) === dayKey() ? 'today' : start.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: start.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }));
+  const [title, line] = current
+    ? [`${current}-day streak`, `Started ${started}`]
+    : best
+      ? ['No streak right now', own ? 'Practice any goal today to start a new one' : 'Their last streak ended']
+      : ['No streak yet', own ? `Practice any goal with ${pet} to start one` : `${who} hasn't started one yet`];
+  return `
+    <div class="profile-streak ${current ? 'lit' : ''}">
+      <span class="ps-flame">${icon('flame')}</span>
+      <span class="ps-text"><strong>${title}</strong><span class="muted small">${line}</span></span>
+      ${best ? `<span class="ps-best"><strong>${best}</strong><span class="muted small">Best</span></span>` : ''}
+    </div>`;
 }
 
 // Adds today to the streak, then awards any streak trophy just reached.
