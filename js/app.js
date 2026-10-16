@@ -176,8 +176,11 @@ function shell(active, arg) {
   const tab = (id, ic, label, href, on = active === id) =>
     `<a href="${href}" class="nav-item ${on ? 'active' : ''}" ${on ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span></a>`;
   $app.innerHTML = `
-    <header class="topbar">
-      <a href="#/feed" class="brand">${icon('paw')}<span>PetPost</span></a>
+    <header class="topbar ${db.isAdmin() ? 'admin' : ''}">
+      <div class="row top-left">
+        <a href="#/feed" class="brand">${icon('paw')}<span>PetPost</span></a>
+        ${db.isAdmin() ? `<a class="mode-chip icon-chip ${active === 'reports' ? 'on' : ''}" href="#/reports" aria-label="Reports" title="Reports">${icon('flag')}</a>` : ''}
+      </div>
       <div class="row top-actions">
         <a class="mode-chip icon-chip" href="#/people" aria-label="Find people" title="Find people">${icon('users')}</a>
         <a class="mode-chip icon-chip bell ${active === 'notifications' ? 'on' : ''}" href="#/notifications" aria-label="Notifications" title="Notifications">${icon('bell')}<span class="bell-badge" hidden></span></a>
@@ -192,7 +195,6 @@ function shell(active, arg) {
       ${tab('create', 'plus', 'Post', '#/create')}
       ${tab('care', 'care', 'Care', '#/care')}
       ${tab('profile', 'user', 'Profile', `#/profile/${me.username}`, active === 'profile' && (!arg || arg === me.username))}
-      ${db.isAdmin() ? tab('reports', 'flag', 'Reports', '#/reports') : ''}
     </nav>`;
 }
 

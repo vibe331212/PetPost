@@ -641,7 +641,7 @@ body::before {
 
 /* ---------- notifications */
 .mode-chip.bell { position: relative; }
-.mode-chip.bell.on { color: var(--accent); border-color: var(--accent); }
+.mode-chip.bell.on, .mode-chip.icon-chip.on { color: var(--accent); border-color: var(--accent); }
 .bell-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e5484d; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
 .bell-badge[hidden] { display: none; }
 .notif-card { padding: 6px 8px; }
@@ -897,3 +897,7 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .push-card.blocked > .ic { color: var(--muted); }
 .push-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .push-card .btn { flex: none; }
+
+/* Admins: the Reports button sits next to the PetPost logo */
+.top-left { gap: 8px; flex-wrap: nowrap; }
+@media (max-width: 400px) { .topbar.admin .top-actions .mode-chip:not(.icon-chip) span { display: none; } .topbar.admin .top-actions .mode-chip:not(.icon-chip) { padding: 8px 10px; } }
