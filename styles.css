@@ -746,3 +746,12 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .slide-rail .act .ic { width: 26px; height: 26px; }
 .slide-rail .act .count { font-size: 12px; font-weight: 600; }
 .scroller .slide .vid-sound { bottom: max(30px, calc(env(safe-area-inset-bottom) + 22px)); right: 18px; z-index: 2; }
+/* Comments in scroll mode: a sheet that slides up over the post */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 4; background: rgba(0,0,0,.35); animation: fade .2s; }
+.barks.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; margin: 0 auto; max-width: 652px;
+  max-height: 70vh; max-height: 70dvh; overflow-y: auto; overscroll-behavior: contain;
+  border-radius: 22px 22px 0 0; padding-bottom: max(16px, env(safe-area-inset-bottom));
+  animation: sheet-up .25s ease-out;
+}
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }

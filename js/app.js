@@ -544,7 +544,7 @@ async function viewScroll(main, id, from = 'feed') {
         </div>
         <div class="slide-rail">
           <button class="act lick ${licked ? 'on' : ''}" data-action="lick" data-id="${x.id}" aria-pressed="${licked}">${icon('lick')}<span class="count">${n}</span><span class="lbl sr-only">${plural(n, 'Lick')}</span></button>
-          <a class="act" href="#/post/${x.id}/${encodeURIComponent(from)}">${icon('bark')}<span class="count">${b}</span><span class="sr-only">${countLabel(b, me.petType)}</span></a>
+          <button class="act" data-action="toggle-barks" data-id="${x.id}">${icon('bark')}<span class="count bark-count">${b}</span><span class="lbl sr-only">${countLabel(b, me.petType)}</span></button>
           <button class="act" data-action="share" data-id="${x.id}" aria-label="Share">${icon('share')}</button>
         </div>
       </article>`;
@@ -567,7 +567,9 @@ async function viewScroll(main, id, from = 'feed') {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && document.body.classList.contains('scroll-mode') && !document.querySelector('dialog[open]')) actions.back();
+  if (e.key !== 'Escape' || !document.body.classList.contains('scroll-mode') || document.querySelector('dialog[open]')) return;
+  const sheet = document.querySelector('.barks.sheet');
+  if (sheet) actions['close-barks'](sheet); else actions.back();
 });
 
 actions.lick = async el => {
@@ -922,10 +924,10 @@ async function postsFor(scope, post) {
   return list.some(p => p.id === post.id) ? list : [post];
 }
 
-function barksSection(p, barks, users) {
+function barksSection(p, barks, users, sheet = false) {
   const sound = soundFor(me.petType);
   return `
-    <section class="card barks" data-post="${p.id}">
+    <section class="card barks${sheet ? ' sheet' : ''}" data-post="${p.id}">
       <header class="row barks-head">
         <h2>${sound.words}</h2>
         <span class="spacer"></span>
@@ -1017,10 +1019,18 @@ actions['toggle-barks'] = async el => {
   const [p, list, users] = await Promise.all([db.get('posts', id), db.byIndex('comments', 'postId', id), usersMap()]);
   if (!p || !card?.isConnected) return;
   const barks = list.filter(c => !blockedSet.has(c.author)).sort((a, b) => a.createdAt - b.createdAt);
-  card.insertAdjacentHTML('afterend', barksSection(p, barks, users));
+  // In scroll mode they slide up from the bottom over the post, so you stay in scroll mode.
+  if (card.classList.contains('slide')) {
+    card.closest('.scroller').insertAdjacentHTML('beforeend', `<div class="sheet-backdrop" data-action="close-barks"></div>${barksSection(p, barks, users, true)}`);
+  } else {
+    card.insertAdjacentHTML('afterend', barksSection(p, barks, users));
+  }
 };
 
-actions['close-barks'] = el => el.closest('.barks').remove();
+actions['close-barks'] = el => {
+  (el.closest('.barks') || document.querySelector('.barks.sheet'))?.remove();
+  document.querySelector('.sheet-backdrop')?.remove();
+};
 
 actions['delete-bark'] = async el => {
   if (el.disabled) return;
