@@ -75,6 +75,15 @@ async function notesFor(table: string, r: any): Promise<Note[]> {
       : `${who.name} reacted to your moment`;
     return [{ to: p.author, body, url: moment ? '#/notifications' : `#/post/${p.id}`, tag: `response-${r.kind}-${r.post_id}-${who.id}` }];
   }
+  if (table === 'trophy_reactions') {
+    if (r.owner === r.user_id || await blockedBetween(r.owner, r.user_id)) return [];
+    const [who, owner] = [await person(r.user_id), await person(r.owner)];
+    if (!who || !owner) return [];
+    const text = String(r.text || '');
+    const body = r.kind === 'lick' ? `${who.name} licked your trophy`
+      : `${who.name} ${pastFor(who.petType)} on your trophy: "${text.length > 90 ? text.slice(0, 90) + '...' : text}"`;
+    return [{ to: r.owner, body, url: `#/profile/${owner.username}/trophies`, tag: `trophy-${r.kind}-${r.id}` }];
+  }
   if (table === 'posts') {
     const who = await person(r.author);
     if (!who) return [];

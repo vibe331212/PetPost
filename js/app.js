@@ -94,6 +94,9 @@ async function usersMap() {
   (await db.all('users')).forEach(u => map.set(u.username, u));
   return map;
 }
+// Sample accounts run by PetPost (not real people) get a small AI tag next to their name.
+const aiTag = u => (u?.ai ? ' <span class="ai-tag" title="A sample account made by PetPost, not a real person">AI</span>' : '');
+
 // ---------- more than one pet
 // Each pet has its own name, type, pet card details, streak and goals. The pet you picked is copied into
 // the account's top-level fields (petName, petType...), so the rest of the app just uses those.
@@ -546,7 +549,7 @@ function postCard(p, author, from = 'feed') {
       <header class="post-head">
         <a href="#/profile/${esc(author.username)}">${avatar(author)}</a>
         <div class="who">
-          <a href="#/profile/${esc(author.username)}" class="name">${esc(author.displayName)}</a>
+          <a href="#/profile/${esc(author.username)}" class="name">${esc(author.displayName)}</a>${aiTag(author)}
           <span class="sub">@${esc(author.username)}${p.petName || author.petName ? ` · ${esc(p.petName || author.petName)}` : ''} · ${ago(p.createdAt)}</span>
         </div>
         ${own ? `<button class="icon-btn" data-action="delete-post" data-id="${p.id}" aria-label="Delete post">${icon('trash')}</button>`
@@ -2064,8 +2067,10 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
 
   let content = '';
   if (tab === 'trophies') {
-    content = trophies.length
-      ? `<div class="trophies">${trophies.map((t, i) => trophyCard(t, i, own, u)).reverse().join('')}</div>`
+    const [reactions, records] = await Promise.all([db.trophyReactions(u.username), recordTrophiesFor(u)]);
+    allUsers.forEach(x => userCache.set(x.username, x));
+    content = trophies.length || records.length
+      ? `<div class="trophies">${records.map(t => trophyCard(t, -1, own, u, reactions)).join('')}${trophies.map((t, i) => trophyCard(t, i, own, u, reactions)).reverse().join('')}</div>`
       : `<div class="card empty">${icon('trophy', 'big')}<p class="muted">${own ? 'Finish a training goal to earn your first trophy.' : 'No trophies yet.'}</p>${own ? '<a class="btn primary" href="#/goals">Set a goal</a>' : ''}</div>`;
   } else if (tab === 'goals') {
     content = (own && goals.length ? `<a class="btn primary new-goal" href="#/goals">${icon('plus')}New goal</a>` : '') + (goals.length
@@ -2092,7 +2097,8 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
     <section class="card profile-head">
       ${avatar(u, 'xl')}
       <div class="pinfo">
-        <h1>${esc(u.displayName)}</h1>
+        <h1>${esc(u.displayName)}${aiTag(u)}</h1>
+        ${u.ai ? '<p class="muted small">A sample account made by PetPost to show what posts can look like. Not a real person.</p>' : ''}
         <p class="muted">@${esc(u.username)}</p>
         ${u.petName ? `<p class="pet">${icon('paw')}${esc(u.petName)}${petKind(u) ? ` <span class="muted">· ${esc(petKind(u))}</span>` : ''}</p>` : ''}
         ${petChips(u, own, shownPet)}
@@ -2256,7 +2262,7 @@ function personRow(u) {
   const on = (me.following || []).includes(u.username);
   return `
     <li class="person" data-search="${esc(`${u.displayName} ${u.username} ${u.petName} ${u.petType}`.toLowerCase())}">
-      <a class="person-link" href="#/profile/${esc(u.username)}">${avatar(u)}<span class="who"><span class="name">${esc(u.displayName)}</span><span class="sub">@${esc(u.username)}${u.petName ? ` · ${esc(u.petName)}` : ''}${u.petType ? ` · ${esc(u.petType)}` : ''}</span></span></a>
+      <a class="person-link" href="#/profile/${esc(u.username)}">${avatar(u)}<span class="who"><span class="name">${esc(u.displayName)}${aiTag(u)}</span><span class="sub">@${esc(u.username)}${u.petName ? ` · ${esc(u.petName)}` : ''}${u.petType ? ` · ${esc(u.petType)}` : ''}</span></span></a>
       ${u.username === me.username ? '' : `<button class="btn sm ${on ? 'ghost' : 'primary'}" data-action="follow" data-user="${esc(u.username)}">${on ? 'Following' : 'Follow'}</button>`}
     </li>`;
 }
@@ -2900,10 +2906,42 @@ const fmtDate = ts => new Date(ts).toLocaleDateString(undefined, { month: 'long'
 
 // "Teach Biscuit to sit" -> "You taught Biscuit to sit!"
 function trophyHeadline(t, own) {
+  if (t.kind === 'record') {
+    const what = t.record === 'licks' ? 'licks' : soundFor(t.petType).words.toLowerCase();
+    const who = own ? (t.shared ? 'You share' : 'You have') : `${t.ownerName || 'They'} ${t.shared ? 'shares' : 'has'}`;
+    return `${who} the record for the most ${what} on PetPost!`;
+  }
   if (t.kind === 'streak') return `${own ? 'You' : t.ownerName || 'They'} trained ${t.petName || 'your pet'} ${t.days} days in a row!`;
   const rest = t.title.replace(/^teach\s+/i, '');
   const said = rest === t.title ? `reached the goal "${t.title}"` : `taught ${rest}`;
   return `${own ? 'You' : t.ownerName || 'They'} ${said}!`;
+}
+
+// ---------- record trophies
+// Whoever's posts got the most licks, and the most barks, on all of PetPost. They aren't saved: they
+// move to whoever beats the record. AI sample accounts can't hold records.
+async function recordHolders() {
+  const [posts, users] = await Promise.all([db.all('posts'), db.all('users')]);
+  const ai = new Set(users.filter(u => u.ai).map(u => u.username));
+  const totals = {};
+  for (const p of posts) {
+    if (ai.has(p.author)) continue;
+    const t = totals[p.author] ||= { licks: 0, barks: 0 };
+    t.licks += (p.licks || []).length;
+    t.barks += p.barkCount || 0;
+  }
+  const top = key => {
+    const best = Math.max(0, ...Object.values(totals).map(t => t[key]));
+    return { count: best, users: best ? Object.keys(totals).filter(n => totals[n][key] === best) : [] };
+  };
+  return { licks: top('licks'), barks: top('barks') };
+}
+async function recordTrophiesFor(u) {
+  const r = await recordHolders();
+  const out = [];
+  if (r.licks.users.includes(u.username)) out.push({ id: 'record-licks', kind: 'record', record: 'licks', count: r.licks.count, shared: r.licks.users.length > 1 });
+  if (r.barks.users.includes(u.username)) out.push({ id: 'record-barks', kind: 'record', record: 'barks', count: r.barks.count, shared: r.barks.users.length > 1 });
+  return out;
 }
 
 function awardTrophy(user, goal) {
@@ -2917,18 +2955,100 @@ function awardTrophy(user, goal) {
 }
 
 const TROPHY_TIERS = [['gold', 'Gold'], ['silver', 'Silver'], ['bronze', 'Bronze']];
-function trophyCard(t, i, own, u) {
-  const [tier, tierName] = t.kind === 'streak' ? ['streak', `${t.days}-day streak`] : TROPHY_TIERS[i % 3];
+function trophyCard(t, i, own, u, reactions = []) {
+  const record = t.kind === 'record';
+  const [tier, tierName] = record ? ['record', 'Record'] : t.kind === 'streak' ? ['streak', `${t.days}-day streak`] : TROPHY_TIERS[i % 3];
+  const what = t.record === 'licks' ? plural(t.count, 'lick') : countLabel(t.count, u.petType).toLowerCase();
+  const detail = record ? `${t.count} ${what} on ${own ? 'your' : 'their'} posts${t.shared ? ' · tied for first' : ''}`
+    : `${t.kind === 'streak' ? 'Streak reached' : 'Goal reached'} ${fmtDate(t.earnedAt)}${t.steps ? ` · ${t.steps} ${t.steps === 1 ? 'step' : 'steps'}` : ''}`;
+  const mine = reactions.filter(r => r.trophyId === t.id);
+  const licks = mine.filter(r => r.kind === 'lick'), barks = mine.filter(r => r.kind === 'comment');
+  const licked = licks.some(r => r.user === me.username);
   return `
-    <article class="card trophy ${tier}">
-      <div class="trophy-icon">${icon(t.kind === 'streak' ? 'flame' : 'trophy')}</div>
-      <div class="trophy-body">
-        <span class="trophy-num">${tierName} · Trophy #${i + 1}</span>
-        <h3>${esc(trophyHeadline({ ...t, ownerName: u.displayName }, own))}</h3>
-        <p class="muted small">${t.kind === 'streak' ? 'Streak reached' : 'Goal reached'} ${fmtDate(t.earnedAt)}${t.steps ? ` · ${t.steps} ${t.steps === 1 ? 'step' : 'steps'}` : ''}</p>
+    <article class="card trophy-card" data-owner="${esc(u.username)}" data-trophy="${esc(t.id)}">
+      <div class="trophy ${tier}">
+        <div class="trophy-icon">${icon(record ? (t.record === 'licks' ? 'lick' : 'bark') : t.kind === 'streak' ? 'flame' : 'trophy')}</div>
+        <div class="trophy-body">
+          <span class="trophy-num">${record ? 'PetPost record' : `${tierName} · Trophy #${i + 1}`}</span>
+          <h3>${esc(trophyHeadline({ ...t, ownerName: u.displayName, petType: u.petType }, own))}</h3>
+          <p class="muted small">${detail}</p>
+        </div>
       </div>
+      <div class="actions trophy-acts">
+        <button class="act lick ${licked ? 'on' : ''}" data-action="trophy-lick" aria-pressed="${licked}">${icon('lick')}<span class="count">${licks.length}</span><span class="lbl">${plural(licks.length, 'Lick')}</span></button>
+        <button class="act" data-action="trophy-barks">${icon('bark')}<span class="count">${barks.length}</span><span class="lbl">${countLabel(barks.length, me.petType)}</span></button>
+      </div>
+      <div class="trophy-barks" hidden>${trophyBarks(barks, u)}</div>
     </article>`;
 }
+
+function trophyBarks(barks, owner) {
+  const sound = soundFor(me.petType);
+  return `
+    <div class="bark-list">${barks.map(c => {
+      const who = userCache.get(c.user) || { username: c.user, displayName: c.user };
+      const canDelete = c.user === me.username || owner.username === me.username;
+      return `
+        <div class="bark">
+          <a href="#/profile/${esc(c.user)}">${avatar(who, 'sm')}</a>
+          <div class="bark-body">
+            <p><a class="name" href="#/profile/${esc(c.user)}">${esc(who.displayName)}</a> <span class="sub">${soundFor(who.petType).past} · ${ago(c.createdAt)}</span></p>
+            <p>${esc(c.text)}</p>
+          </div>
+          ${canDelete ? `<button class="icon-btn sm" data-action="trophy-bark-delete" data-id="${esc(c.id)}" aria-label="Delete">${icon('trash')}</button>` : ''}
+        </div>`;
+    }).join('') || `<p class="muted small no-barks">No ${sound.words.toLowerCase()} yet.</p>`}</div>
+    <form data-form="trophy-bark" class="bark-form">
+      ${avatar(me, 'sm')}
+      <input name="text" maxlength="400" placeholder="${esc(sound.prompt)}" required autocomplete="off" aria-label="Write a comment">
+      <button class="btn primary sm">${sound.word}</button>
+    </form>`;
+}
+const userCache = new Map();
+
+// Redraw one trophy card from what's saved, keeping its comments open if they were.
+async function refreshTrophy(card) {
+  const owner = card.dataset.owner, open = !card.querySelector('.trophy-barks').hidden;
+  const [u, reactions] = await Promise.all([owner === me.username ? me : db.get('users', owner), db.trophyReactions(owner)]);
+  const all = [...(u.trophies || [])].sort((a, b) => a.earnedAt - b.earnedAt);
+  const i = all.findIndex(t => t.id === card.dataset.trophy);
+  const t = i >= 0 ? all[i] : (await recordTrophiesFor(u)).find(x => x.id === card.dataset.trophy);
+  if (!t) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = trophyCard(t, i, owner === me.username, u, reactions);
+  const fresh = tmp.firstElementChild;
+  fresh.querySelector('.trophy-barks').hidden = !open;
+  card.replaceWith(fresh);
+}
+
+actions['trophy-lick'] = async el => {
+  const card = el.closest('.trophy-card');
+  const on = !el.classList.contains('on');
+  el.classList.toggle('on', on);
+  try { await db.trophyLick(card.dataset.owner, card.dataset.trophy, on); } catch (err) { toast(`Could not lick it: ${err.message}`); }
+  refreshTrophy(card);
+};
+actions['trophy-barks'] = el => {
+  const box = el.closest('.trophy-card').querySelector('.trophy-barks');
+  box.hidden = !box.hidden;
+  if (!box.hidden) box.querySelector('input')?.focus();
+};
+actions['trophy-bark-delete'] = async el => {
+  if (!confirm('Delete this comment?')) return;
+  const card = el.closest('.trophy-card');
+  try { await db.deleteTrophyReaction(el.dataset.id); } catch (err) { toast(`Could not delete it: ${err.message}`); }
+  refreshTrophy(card);
+};
+forms['trophy-bark'] = async (form, fd) => {
+  const text = String(fd.get('text') || '').trim();
+  if (!text || form.dataset.sending) return;
+  form.dataset.sending = '1';
+  const card = form.closest('.trophy-card');
+  try {
+    await db.trophyComment(card.dataset.owner, card.dataset.trophy, text);
+    await refreshTrophy(card);
+  } catch (err) { toast(`Could not send it: ${err.message}`); delete form.dataset.sending; }
+};
 
 // ---------- daily streaks
 // Practising any goal on a day keeps the streak going; skipping a whole day resets it.

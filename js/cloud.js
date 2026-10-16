@@ -10,7 +10,7 @@ export const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 const BUCKET = 'media';
 const email = username => `${username}@users.petpost.app`;
-const PUBLIC_FIELDS = ['displayName', 'petName', 'petType', 'bio', 'avatarPath', 'avatarAt', 'trophies', 'practiceDays', 'streakTrophies', 'breed', 'birthday', 'treat', 'toy', 'pets', 'activePet', 'petCount'];
+const PUBLIC_FIELDS = ['ai', 'displayName', 'petName', 'petType', 'bio', 'avatarPath', 'avatarAt', 'trophies', 'practiceDays', 'streakTrophies', 'breed', 'birthday', 'treat', 'toy', 'pets', 'activePet', 'petCount'];
 const PRIVATE_FIELDS = ['saved', 'care', 'careLog', 'notifSeen', 'cameraAsked', 'theme', 'shortcuts', 'seenMoments'];
 const POST_FIELDS = ['petId', 'petIds', 'petName', 'kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt', 'poll', 'ask', 'highlight', 'quiz', 'rate', 'iPos'];
 
@@ -244,6 +244,30 @@ export async function del(store, key) {
 export async function report({ postId = null, username = null, reason }) {
   check(await sb.from('reports').insert({ reporter: myId, post_id: postId, user_id: username ? idOf(username) : null, reason }));
 }
+// ---------- licks and comments on trophies
+// Everything said about one person's trophies (or, with no name, about yours).
+export async function trophyReactions(username = myName) {
+  await loadProfiles();
+  const owner = idOf(username);
+  if (!owner) return [];
+  const { data, error } = await sb.from('trophy_reactions').select('id, trophy_id, user_id, kind, text, created_at').eq('owner', owner).order('created_at');
+  if (error) return []; // older database without this yet
+  return data.map(r => ({ id: r.id, owner: username, trophyId: r.trophy_id, user: nameOf(r.user_id), kind: r.kind, text: r.text, createdAt: ms(r.created_at) })).filter(r => r.user);
+}
+export async function trophyLick(username, trophyId, on) {
+  await loadProfiles();
+  const owner = idOf(username);
+  if (on) check(await sb.from('trophy_reactions').insert({ owner, trophy_id: trophyId, user_id: myId, kind: 'lick' }));
+  else check(await sb.from('trophy_reactions').delete().eq('owner', owner).eq('trophy_id', trophyId).eq('user_id', myId).eq('kind', 'lick'));
+}
+export async function trophyComment(username, trophyId, text) {
+  await loadProfiles();
+  check(await sb.from('trophy_reactions').insert({ owner: idOf(username), trophy_id: trophyId, user_id: myId, kind: 'comment', text }));
+}
+export async function deleteTrophyReaction(id) {
+  check(await sb.from('trophy_reactions').delete().eq('id', id));
+}
+
 // ---------- phone notifications: save or forget this phone's push address
 export async function savePush(sub) {
   check(await sb.rpc('save_push_subscription', { sub }));

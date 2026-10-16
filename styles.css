@@ -914,3 +914,13 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .posting-as .ic { width: 15px; height: 15px; }
 
 .tag-pets { margin: 2px 0 14px; }
+
+/* Trophy cards with licks and comments */
+.trophy-card { display: flex; flex-direction: column; gap: 6px; }
+.trophy-card .trophy-acts { padding: 4px 0 0; margin: 0 -6px; }
+.trophy-card .trophy-barks { border-top: 1px solid var(--line); padding-top: 10px; }
+.trophy-card .bark-form { margin-top: 10px; }
+.trophy.record .trophy-icon { background: linear-gradient(135deg, #ffd6e7, #ff5a8a 55%, #7b5cff); color: #fff; }
+/* AI sample accounts */
+.ai-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .06em; vertical-align: middle; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+h1 .ai-tag { font-size: 12px; }
