@@ -659,7 +659,9 @@ async function viewFeed(main) {
     .forEach(m => { if (!groups.has(m.author)) groups.set(m.author, []); groups.get(m.author).push(m); });
   momentGroups = [...groups.entries()]
     .map(([u, list]) => ({ user: users.get(u) || { username: u, displayName: u }, list }))
-    .sort((a, b) => (b.user.username === me.username) - (a.user.username === me.username) || b.list.at(-1).createdAt - a.list.at(-1).createdAt);
+    .sort((a, b) => (b.user.username === me.username) - (a.user.username === me.username)
+      || groupSeen(a) - groupSeen(b) // moments you haven't watched come first
+      || b.list.at(-1).createdAt - a.list.at(-1).createdAt);
 
   // Profiles you dragged up here, for getting to them fast.
   const shortcuts = (me.shortcuts || []).map(n => users.get(n)).filter(u => u && !blockedSet.has(u.username));
@@ -674,7 +676,7 @@ async function viewFeed(main) {
         </a>`).join('')}
       ${momentGroups.map((g, i) => `
         <button class="moment-bubble" data-action="open-moments" data-index="${i}">
-          <span class="ring">${avatar(g.user, 'lg')}</span>
+          <span class="ring ${groupSeen(g) ? 'seen' : ''}">${avatar(g.user, 'lg')}</span>
           <span class="mb-name">${esc(g.user.username === me.username ? 'You' : g.user.displayName)}</span>
         </button>`).join('')}
     </section>
@@ -807,7 +809,33 @@ actions['feed-mode'] = el => {
 // Moments play one after another: photos for a few seconds, videos to the end. Polls, questions and
 // reactions sit on top; the person who posted sees who reacted, voted and answered.
 const REACTIONS = [['lick', 'Lick'], ['flame', 'Fire'], ['sparkle', 'Wow'], ['paw', 'Paws up']];
-actions['open-moments'] = el => openViewer(momentGroups, +el.dataset.index);
+actions['open-moments'] = el => openViewer(momentGroups, +el.dataset.index, firstUnseen(momentGroups[+el.dataset.index]));
+
+// Which moments you've watched, kept with your account (as id -> when it disappears) so your other
+// devices know too. A ring turns grey once you've seen all of that person's moments.
+let seenMap = null, seenFor = null, seenChanged = false;
+function seen() {
+  if (seenFor !== me.username) { seenMap = new Map(Object.entries(me.seenMoments || {})); seenFor = me.username; }
+  return seenMap;
+}
+const groupSeen = g => g.list.every(m => seen().has(m.id));
+const firstUnseen = g => Math.max(0, g.list.findIndex(m => !seen().has(m.id)));
+function markSeen(m) {
+  if (m.kind !== 'moment' || !(m.expiresAt > Date.now()) || seen().has(m.id)) return;
+  seen().set(m.id, m.expiresAt);
+  seenChanged = true;
+}
+function saveSeen() {
+  if (!seenChanged || !me) return;
+  seenChanged = false;
+  const now = Date.now();
+  me.seenMoments = Object.fromEntries([...seen()].filter(([, gone]) => gone > now));
+  saveMe().catch(() => {});
+  document.querySelectorAll('.moments [data-action="open-moments"]').forEach(b => {
+    const g = momentGroups[+b.dataset.index];
+    if (g) b.querySelector('.ring').classList.toggle('seen', groupSeen(g));
+  });
+}
 
 function openViewer(groups, gi, i = 0) {
   closeViewer();
@@ -831,10 +859,38 @@ function viewerKeys(e) {
 function closeViewer() {
   if (!viewer) return;
   cancelAnimationFrame(viewer.raf);
+  clearTimeout(viewer.holdTimer);
   viewer.el.remove();
   viewer = null;
   document.removeEventListener('keydown', viewerKeys);
+  saveSeen();
 }
+
+// Press and hold to pause a moment (the bars and buttons fade so you can see it). Letting go
+// carries on, and doesn't count as a tap to the next one.
+document.addEventListener('pointerdown', e => {
+  if (!viewer || !e.target.closest?.('.viewer .tap, .viewer .viewer-media')) return;
+  clearTimeout(viewer.holdTimer);
+  viewer.holdTimer = setTimeout(() => {
+    if (!viewer) return;
+    viewer.holding = true;
+    viewer.el.classList.add('holding');
+    pauseMoment();
+  }, 220);
+});
+function endHold() {
+  if (!viewer) return;
+  clearTimeout(viewer.holdTimer);
+  if (!viewer.holding) return;
+  viewer.holding = false;
+  viewer.heldAt = Date.now();
+  viewer.el.classList.remove('holding');
+  resumeMoment();
+}
+document.addEventListener('pointerup', endHold);
+document.addEventListener('pointercancel', endHold);
+document.addEventListener('contextmenu', e => { if (e.target.closest?.('.viewer')) e.preventDefault(); });
+const justHeld = () => viewer && Date.now() - (viewer.heldAt || 0) < 400;
 
 // Pausing is counted, so typing an answer while the activity list is open still keeps it paused.
 function pauseMoment() {
@@ -855,6 +911,9 @@ function showMoment() {
   const own = m.author === me.username;
   cancelAnimationFrame(viewer.raf);
   viewer.paused = 0;
+  viewer.holding = false;
+  viewer.el.classList.remove('holding');
+  markSeen(m);
   viewer.el.innerHTML = `
     <div class="viewer-inner" data-post="${m.id}">
       <div class="bars">${g.list.map((_, k) => `<span><i style="width:${k < viewer.i ? 100 : 0}%"></i></span>`).join('')}</div>
@@ -1035,7 +1094,7 @@ function stepMoment(dir) {
   if (!viewer) return;
   const g = viewer.groups[viewer.gi];
   viewer.i += dir;
-  if (viewer.i >= g.list.length) { viewer.gi++; viewer.i = 0; }
+  if (viewer.i >= g.list.length) { viewer.gi++; viewer.i = viewer.groups[viewer.gi] ? firstUnseen(viewer.groups[viewer.gi]) : 0; }
   else if (viewer.i < 0) {
     viewer.gi--;
     if (viewer.gi < 0) { viewer.gi = 0; viewer.i = 0; }
@@ -1045,8 +1104,8 @@ function stepMoment(dir) {
   showMoment();
 }
 
-actions['moment-next'] = () => stepMoment(1);
-actions['moment-prev'] = () => stepMoment(-1);
+actions['moment-next'] = () => { if (!justHeld()) stepMoment(1); };
+actions['moment-prev'] = () => { if (!justHeld()) stepMoment(-1); };
 actions['close-viewer'] = () => closeViewer();
 actions['delete-moment'] = async el => {
   if (!confirm('Delete this moment?')) return;

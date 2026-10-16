@@ -827,3 +827,11 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .ps-text strong { font-size: 15px; }
 .ps-best { display: flex; flex-direction: column; align-items: center; flex: none; }
 .ps-best strong { font-size: 17px; }
+
+/* Seen moments: the ring goes grey once you've watched them all */
+.moments .ring.seen:not(.add):not(.pin) { background: var(--line); }
+/* Hold to pause: everything but the moment fades out */
+.viewer { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.viewer .bars, .viewer header, .viewer-foot { transition: opacity .2s; }
+.viewer.holding .bars, .viewer.holding header, .viewer.holding .viewer-foot { opacity: 0; }
+.viewer input { -webkit-user-select: text; user-select: text; }
