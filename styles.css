@@ -912,3 +912,5 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .pet-chip.add .ic { color: var(--accent); }
 .posting-as { display: flex; align-items: center; gap: 5px; margin: -4px 0 12px; }
 .posting-as .ic { width: 15px; height: 15px; }
+
+.tag-pets { margin: 2px 0 14px; }

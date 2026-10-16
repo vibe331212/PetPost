@@ -97,7 +97,8 @@ async function usersMap() {
 // ---------- more than one pet
 // Each pet has its own name, type, pet card details, streak and goals. The pet you picked is copied into
 // the account's top-level fields (petName, petType...), so the rest of the app just uses those.
-const PET_FIELDS = ['petName', 'petType', 'breed', 'birthday', 'treat', 'toy', 'practiceDays', 'streakTrophies'];
+// petCount is for groups: "The chickens" with a petCount of 10.
+const PET_FIELDS = ['petName', 'petType', 'petCount', 'breed', 'birthday', 'treat', 'toy', 'practiceDays', 'streakTrophies'];
 const petFields = u => Object.fromEntries(PET_FIELDS.map(k => [k, u?.[k]]));
 const petsOf = u => (Array.isArray(u?.pets) && u.pets.length ? u.pets : [{ id: 'pet-1', ...petFields(u) }]);
 const activePetId = u => (petsOf(u).some(p => p.id === u?.activePet) ? u.activePet : petsOf(u)[0].id);
@@ -117,7 +118,20 @@ function usePet(u, id) {
 }
 // The same person, showing one of their other pets (for looking at someone else's profile).
 const withPet = (u, id) => ({ ...u, ...petFields(petsOf(u).find(p => p.id === id) || u) });
-const petTag = () => ({ petId: activePetId(me), petName: me.petName || '' });
+// "Dog", or "10 Chickens" for a group.
+const IRREGULAR = { mouse: 'Mice', goose: 'Geese', sheep: 'Sheep', fish: 'Fish', deer: 'Deer' };
+const typePlural = t => IRREGULAR[t.toLowerCase()] || (/(s|sh|ch|x)$/i.test(t) ? `${t}es` : `${t}s`);
+const petKind = p => (+p?.petCount > 1 && p.petType ? `${p.petCount} ${typePlural(p.petType)}` : p?.petType || '');
+// "Rosie", "Rosie & Pip", "Rosie, Pip & The chickens".
+const joinNames = names => (names.length < 3 ? names.join(' & ') : `${names.slice(0, -1).join(', ')} & ${names.at(-1)}`);
+// Which of your pets a post is about: the ones ticked on the post page, or the pet you're posting as.
+// petId stays the first one for older code; petIds lists them all; petName reads "Rosie & The chickens".
+function petTag(ids = [activePetId(me)]) {
+  syncActivePet(me);
+  const pets = me.pets.filter(p => ids.includes(p.id));
+  if (!pets.length) return { petId: activePetId(me), petIds: [activePetId(me)], petName: me.petName || '' };
+  return { petId: pets[0].id, petIds: pets.map(p => p.id), petName: joinNames(pets.map(p => p.petName).filter(Boolean)) };
+}
 const saveMe = () => { syncActivePet(me); return db.put('users', me); };
 
 function go(hash) {
@@ -1453,11 +1467,14 @@ async function viewCreate(main, arg) {
   const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.completedAt && goalForPet(g, me));
   const goalId = arg?.startsWith('goal-') ? arg.slice(5) : '';
   const goal = goals.find(g => g.id === goalId);
-  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '', iPos: { x: 0.5, y: 0.72, s: 1, r: 0 } };
+  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '', iPos: { x: 0.5, y: 0.72, s: 1, r: 0 }, petIds: [activePetId(me)] };
   main.innerHTML = `
     <section class="card create">
       <h1>New post</h1>
-      ${petsOf(me).length > 1 ? `<p class="posting-as muted small">${icon('paw')}Posting as <strong>${esc(me.petName || 'your pet')}</strong> · <a href="#/profile/${esc(me.username)}">Switch pet</a></p>` : ''}
+      ${petsOf(me).length > 1 ? `
+        <div class="field tag-pets"><span>Who's in it?</span>
+          <div class="pet-chips">${petsOf(me).map(p => `<button type="button" class="pet-chip ${draft.petIds.includes(p.id) ? 'on' : ''}" data-action="tag-pet" data-id="${esc(p.id)}" aria-pressed="${draft.petIds.includes(p.id)}">${icon('paw')}${esc(p.petName || 'Pet')}</button>`).join('')}</div>
+        </div>` : ''}
       <div class="seg kinds">
         ${['photo', 'video', 'moment'].map(k => `<button type="button" data-action="kind" data-kind="${k}">${icon(k)}${cap(k)}</button>`).join('')}
       </div>
@@ -1639,6 +1656,15 @@ document.addEventListener('input', e => {
     if (card) placeSticker(card);
   } else if (e.target.closest?.('.create form[data-form="publish"] .extras')) renderStickerPreview();
 });
+
+// Tick which of your pets are in the post. The pet you're posting as starts ticked; at least one stays ticked.
+actions['tag-pet'] = el => {
+  const id = el.dataset.id, on = !draft.petIds.includes(id);
+  if (!on && draft.petIds.length === 1) return toast('Tick at least one pet.');
+  draft.petIds = on ? [...draft.petIds, id] : draft.petIds.filter(x => x !== id);
+  el.classList.toggle('on', on);
+  el.setAttribute('aria-pressed', on);
+};
 
 // The poll, quiz, question or rating picked on the create page, ready to save on the post.
 // Returns null (after saying what's missing) if it isn't filled in properly.
@@ -1866,7 +1892,7 @@ forms.publish = async (form, fd) => {
   const post = {
     id: db.uid(),
     author: me.username,
-    ...petTag(),
+    ...petTag(draft.petIds),
     kind: isMoment ? 'moment' : draft.result.type === 'video' ? 'video' : 'photo',
     mediaType: draft.result.type,
     width: draft.result.width || null,
@@ -1911,7 +1937,7 @@ async function publishMoment(form, fd) {
     for (const [i, it] of items.entries()) {
       if (items.length > 1) toast(`Sharing ${i + 1} of ${items.length}...`);
       await db.put('posts', {
-        id: db.uid(), author: me.username, ...petTag(), kind: 'moment', mediaType: it.result.type,
+        id: db.uid(), author: me.username, ...petTag(draft.petIds), kind: 'moment', mediaType: it.result.type,
         width: it.result.width || null, height: it.result.height || null, media: it.result.blob,
         caption: i === 0 ? String(fd.get('caption') || '').trim() : '',
         poll: i === 0 ? poll : null, ask: i === 0 ? ask : null,
@@ -1956,6 +1982,8 @@ actions['switch-pet'] = async el => {
   route();
 };
 
+const countFrom = fd => Math.max(1, Math.min(999, Math.round(+fd.get('petCount') || 1)));
+
 actions['add-pet'] = () => {
   const d = document.createElement('dialog');
   d.className = 'modal';
@@ -1965,7 +1993,10 @@ actions['add-pet'] = () => {
       <p class="muted">Each pet gets its own goals, streak and pet card. Switch between them on your profile.</p>
       <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" required></label>
       <label class="field"><span>Pet type</span><select name="petType">${PET_TYPES.map(t => `<option>${esc(t)}</option>`).join('')}</select><small class="sound-hint muted">${soundHint(PET_TYPES[0])}</small></label>
-      <label class="field"><span>Breed</span><input name="breed" maxlength="40" placeholder="Optional"></label>
+      <div class="two">
+        <label class="field"><span>How many?</span><input type="number" name="petCount" min="1" max="999" value="1"><small class="muted">More than 1 makes it a group, like "The chickens" and 10.</small></label>
+        <label class="field"><span>Breed</span><input name="breed" maxlength="40" placeholder="Optional"></label>
+      </div>
       <p class="form-error" role="alert"></p>
       <div class="row"><span class="spacer"></span><button type="button" class="btn ghost" data-action="close-dialog">Cancel</button><button class="btn primary">Add pet</button></div>
     </form>`;
@@ -1979,7 +2010,7 @@ forms['add-pet'] = (form, fd) => withBusy(form, async () => {
   if (!name) throw new Error("Type your pet's name.");
   syncActivePet(me);
   const id = `pet-${db.uid().slice(0, 8)}`;
-  me.pets.push({ id, petName: name, petType: String(fd.get('petType') || '').trim(), breed: String(fd.get('breed') || '').trim(), practiceDays: [], streakTrophies: [] });
+  me.pets.push({ id, petName: name, petType: String(fd.get('petType') || '').trim(), petCount: countFrom(fd), breed: String(fd.get('breed') || '').trim(), practiceDays: [], streakTrophies: [] });
   usePet(me, id);
   await saveMe();
   form.closest('dialog').close();
@@ -2063,7 +2094,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
       <div class="pinfo">
         <h1>${esc(u.displayName)}</h1>
         <p class="muted">@${esc(u.username)}</p>
-        ${u.petName ? `<p class="pet">${icon('paw')}${esc(u.petName)}${u.petType ? ` <span class="muted">· ${esc(u.petType)}</span>` : ''}</p>` : ''}
+        ${u.petName ? `<p class="pet">${icon('paw')}${esc(u.petName)}${petKind(u) ? ` <span class="muted">· ${esc(petKind(u))}</span>` : ''}</p>` : ''}
         ${petChips(u, own, shownPet)}
         ${u.bio ? `<p class="bio">${esc(u.bio)}</p>` : ''}
       </div>
@@ -2113,7 +2144,10 @@ actions['edit-profile'] = () => {
         <label class="field"><span>Your name</span><input name="displayName" maxlength="40" value="${esc(me.displayName)}" required><small class="muted">Your own name. Shown in bold on your posts.</small></label>
         <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" value="${esc(me.petName)}"><small class="muted">Shown after your @username</small></label>
       </div>
-      <label class="field"><span>Pet type</span><select name="petType">${[...new Set([...PET_TYPES, me.petType].filter(Boolean))].map(t => `<option ${t === me.petType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><small class="sound-hint muted">${soundHint(me.petType)}</small></label>
+      <div class="two">
+        <label class="field"><span>Pet type</span><select name="petType">${[...new Set([...PET_TYPES, me.petType].filter(Boolean))].map(t => `<option ${t === me.petType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><small class="sound-hint muted">${soundHint(me.petType)}</small></label>
+        <label class="field"><span>How many?</span><input type="number" name="petCount" min="1" max="999" value="${+me.petCount || 1}"><small class="muted">More than 1 for a group</small></label>
+      </div>
       <label class="field"><span>Bio</span><textarea name="bio" maxlength="200" rows="3">${esc(me.bio)}</textarea></label>
       ${petsOf(me).length > 1 ? `<p class="muted small">You're editing ${esc(me.petName || 'this pet')}. Switch pets on your profile to edit another one.</p>` : ''}
       <h3 class="form-section">Pet card</h3>
@@ -2186,6 +2220,7 @@ forms.profile = (form, fd) => withBusy(form, async () => {
   me.displayName = String(fd.get('displayName')).trim() || me.username;
   me.petName = String(fd.get('petName') || '').trim();
   me.petType = String(fd.get('petType') || '').trim();
+  me.petCount = countFrom(fd);
   me.bio = String(fd.get('bio') || '').trim();
   me.breed = String(fd.get('breed') || '').trim();
   me.birthday = String(fd.get('birthday') || '');
@@ -2589,7 +2624,7 @@ async function petCard(u) {
   ].filter(([, v]) => v);
   return {
     petName: u.petName || u.displayName,
-    line: [u.petType, u.breed].filter(Boolean).join(' · '),
+    line: [petKind(u), u.breed].filter(Boolean).join(' · '),
     facts,
     tricks,
     stats: [[String((u.trophies || []).length), (u.trophies || []).length === 1 ? 'Trophy' : 'Trophies'], [String(tricks.length), tricks.length === 1 ? 'Trick' : 'Tricks'], [String(best), 'Best streak']],
