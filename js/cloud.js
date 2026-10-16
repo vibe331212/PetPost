@@ -282,7 +282,8 @@ export async function adminReports() {
   }));
 }
 export async function dismissReports(ids) {
-  check(await sb.from('reports').delete().in('id', ids));
+  const dismissed = check(await sb.rpc('admin_dismiss_reports', { ids }));
+  if (!dismissed) throw new Error('Nothing was dismissed. The database may need updating.');
 }
 export async function adminDeletePost(postId) {
   check(await sb.rpc('admin_delete_post', { target: postId }));
