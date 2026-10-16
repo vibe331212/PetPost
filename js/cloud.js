@@ -12,7 +12,7 @@ const BUCKET = 'media';
 const email = username => `${username}@users.petpost.app`;
 const PUBLIC_FIELDS = ['displayName', 'petName', 'petType', 'bio', 'avatarPath', 'avatarAt', 'trophies', 'practiceDays', 'streakTrophies', 'breed', 'birthday', 'treat', 'toy'];
 const PRIVATE_FIELDS = ['saved', 'care', 'careLog', 'notifSeen', 'cameraAsked', 'theme', 'shortcuts', 'seenMoments'];
-const POST_FIELDS = ['kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt', 'poll', 'ask', 'highlight'];
+const POST_FIELDS = ['kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt', 'poll', 'ask', 'highlight', 'quiz', 'rate', 'iPos'];
 
 const pick = (obj, keys) => Object.fromEntries(keys.filter(k => obj[k] !== undefined).map(k => [k, obj[k]]));
 const iso = ts => new Date(ts || Date.now()).toISOString();
@@ -286,6 +286,28 @@ export async function respondToMoment(postId, kind, value) {
 export async function pollResults(postId) {
   const rows = check(await sb.rpc('moment_poll_results', { target: postId }));
   return Object.fromEntries(rows.map(r => [r.choice, Number(r.votes)]));
+}
+// Responses to many posts at once: yours, plus everyone's on your own posts.
+export async function responsesFor(postIds) {
+  if (!postIds.length) return [];
+  const { data, error } = await sb.from('moment_responses').select('post_id,user_id,kind,value,created_at').in('post_id', postIds);
+  if (error) return []; // older database without responses yet
+  await loadProfiles();
+  return data.map(toResponse).filter(r => r.user);
+}
+// Totals for polls, quizzes and ratings, without who responded:
+// { [postId]: { votes: { "0": 3, "1": 5 }, average: 8.4, ratings: 12 } }
+export async function postResults(postIds) {
+  if (!postIds.length) return {};
+  const { data, error } = await sb.rpc('post_results', { targets: postIds });
+  if (error) return {};
+  const out = {};
+  for (const r of data) {
+    const o = out[r.post_id] ||= { votes: {}, average: null, ratings: 0 };
+    if (r.choice != null) o.votes[r.choice] = Number(r.votes);
+    else { o.average = Number(r.average); o.ratings = Number(r.votes); }
+  }
+  return out;
 }
 // Other people's responses to your moments, for notifications.
 export async function momentActivityForMe() {

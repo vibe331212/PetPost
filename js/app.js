@@ -125,7 +125,7 @@ document.addEventListener('submit', e => {
 });
 document.addEventListener('dblclick', e => {
   const media = e.target.closest('.post .media');
-  if (!media || e.target.closest('button, .vid-bar')) return;
+  if (!media || e.target.closest('button, .vid-bar, .interact')) return;
   const btn = media.closest('.post').querySelector('[data-action="lick"]');
   media.classList.remove('burst'); void media.offsetWidth; media.classList.add('burst');
   if (!btn.classList.contains('on')) actions.lick(btn);
@@ -161,6 +161,7 @@ async function route() {
   const main = document.getElementById('view');
   try {
     await fn(main, a, b);
+    hydrateInteractives(main);
     updateCareBadge();
     updateBell();
   } catch (err) {
@@ -417,7 +418,7 @@ document.addEventListener('pause', e => {
 let tapTimer = null;
 document.addEventListener('click', e => {
   const v = e.target.closest('.media')?.querySelector('video.feed-video');
-  if (!v || e.target.closest('button, a, .vid-bar')) return;
+  if (!v || e.target.closest('button, a, .vid-bar, .interact')) return;
   clearTimeout(tapTimer);
   if (e.detail > 1) return;
   tapTimer = setTimeout(() => {
@@ -510,6 +511,7 @@ function postCard(p, author, from = 'feed') {
       </header>
       <div class="media">${mediaEl(p)}<span class="lick-burst">${icon('lick')}</span>
         <button type="button" class="scroll-open" data-action="scroll-mode" data-id="${p.id}" data-from="${esc(from)}" aria-label="Full screen" title="Full screen">${icon('expand')}</button>
+        ${interactCard(p)}
       </div>
       <div class="actions">
         <button class="act lick ${licked ? 'on' : ''}" data-action="lick" data-id="${p.id}" aria-pressed="${licked}">${icon('lick')}<span class="count">${n}</span><span class="lbl">${plural(n, 'Lick')}</span></button>
@@ -524,6 +526,157 @@ function postCard(p, author, from = 'feed') {
     </article>`;
 }
 
+// ---------- polls, quizzes, question boxes and rating sliders on posts
+// The card is drawn blank first; hydrateInteractives fills in your vote, answer or rating and the
+// totals for every card on the page in two requests. The post's owner sees totals and who responded.
+const interactPosts = new Map();
+const clampPos = v => Math.min(0.92, Math.max(0.08, +v || 0.5));
+const clampSize = v => Math.min(1.5, Math.max(0.6, +v || 1));
+function interactCard(p) {
+  const own = p.author === me.username;
+  // A sticker on top of the photo or video, where (and how big) the poster put it.
+  const pos = p.iPos || {};
+  const place = `left:${clampPos(pos.x ?? 0.5) * 100}%;top:${clampPos(pos.y ?? 0.72) * 100}%;--s:${clampSize(pos.s ?? 1)}`;
+  const card = (type, body) => { interactPosts.set(p.id, p); return `<div class="interact" data-post="${p.id}" data-type="${type}" style="${place}">${body}<p class="i-foot"></p></div>`; };
+  if (p.poll || p.quiz) {
+    const it = p.poll || p.quiz;
+    return card(p.poll ? 'poll' : 'quiz', `
+      <p class="i-q">${p.quiz ? '<span class="i-tag">Quiz</span>' : ''}${esc(it.question)}</p>
+      ${it.options.map((o, k) => `<button type="button" class="i-choice" data-action="post-vote" data-id="${p.id}" data-choice="${k}" ${own ? 'disabled' : ''}><span class="i-fill"></span><span class="i-label">${esc(o)}</span><span class="i-pct"></span></button>`).join('')}`);
+  }
+  if (p.ask) return card('ask', `
+    <p class="i-q">${esc(p.ask.prompt)}</p>
+    ${own ? '' : `<form data-form="post-answer" data-id="${p.id}" class="i-answer"><input name="answer" maxlength="300" placeholder="Type your answer" autocomplete="off" aria-label="Your answer"><button class="btn primary sm">Send</button></form>`}`);
+  if (p.rate) return card('rate', `
+    <p class="i-q">${esc(p.rate.question)}</p>
+    ${own ? '' : `<div class="i-rate"><input type="range" min="1" max="10" step="1" value="5" aria-label="Your rating, 1 to 10"><output>5</output><button type="button" class="btn primary sm" data-action="post-rate" data-id="${p.id}">Rate</button></div>`}`);
+  return '';
+}
+
+async function hydrateInteractives(root) {
+  const cards = [...root.querySelectorAll('.interact:not([data-ready])')];
+  if (!cards.length) return;
+  const ids = [...new Set(cards.map(c => c.dataset.post))];
+  const [rows, totals] = await Promise.all([db.responsesFor(ids), db.postResults(ids)]);
+  for (const c of cards) {
+    c.dataset.ready = '1';
+    renderInteract(c, rows.filter(r => r.postId === c.dataset.post), totals[c.dataset.post]);
+  }
+}
+
+function renderInteract(card, rows, totals = {}) {
+  const p = interactPosts.get(card.dataset.post);
+  if (!p) return;
+  card.responses = rows;
+  const own = p.author === me.username;
+  const mineOf = kind => rows.find(r => r.user === me.username && r.kind === kind)?.value;
+  const others = kind => rows.filter(r => r.user !== me.username && r.kind === kind).length;
+  const words = (n, w) => (n === 1 ? w : w.endsWith('s') ? `${w}es` : `${w}s`);
+  const seeWho = (n, word) => n ? `${n} ${words(n, word)} · <button type="button" class="i-link" data-action="post-responses" data-id="${p.id}">See who</button>` : `No ${words(2, word)} yet`;
+  const foot = card.querySelector('.i-foot');
+  const type = card.dataset.type;
+  if (type === 'poll' || type === 'quiz') {
+    const vote = mineOf('vote');
+    if (own || vote != null) showChoiceResults(card, p, totals.votes || {}, vote);
+    if (own) foot.innerHTML = seeWho(others('vote'), type === 'quiz' ? 'guess' : 'vote');
+  } else if (type === 'ask') {
+    const answer = mineOf('answer');
+    if (answer != null) card.querySelector('.i-answer')?.replaceWith(Object.assign(document.createElement('p'), { className: 'i-done', textContent: `You answered: “${answer}”` }));
+    if (own) foot.innerHTML = seeWho(others('answer'), 'answer');
+  } else if (type === 'rate') {
+    const rating = mineOf('rating');
+    if (own || rating != null) showRating(card, totals, rating);
+    if (own) foot.innerHTML = seeWho(others('rating'), 'rating');
+  }
+}
+
+function showChoiceResults(card, p, votes, myVote) {
+  const it = p.poll || p.quiz;
+  const total = it.options.reduce((n, _, k) => n + (votes[k] || 0), 0);
+  card.classList.add('answered');
+  card.querySelectorAll('.i-choice').forEach(b => {
+    const k = b.dataset.choice, pct = total ? Math.round(((votes[k] || 0) / total) * 100) : 0;
+    b.querySelector('.i-fill').style.width = `${pct}%`;
+    b.querySelector('.i-pct').textContent = `${pct}%`;
+    b.classList.toggle('mine', myVote != null && String(myVote) === k);
+    if (p.quiz) {
+      b.classList.toggle('right', +k === p.quiz.answer);
+      b.classList.toggle('wrong', myVote != null && String(myVote) === k && +k !== p.quiz.answer);
+    }
+  });
+  if (p.quiz && myVote != null && p.author !== me.username) {
+    const right = +myVote === p.quiz.answer;
+    const pctRight = total ? Math.round(((votes[p.quiz.answer] || 0) / total) * 100) : 0;
+    card.querySelector('.i-foot').textContent = `${right ? 'You got it right!' : `Not quite. The answer was “${p.quiz.options[p.quiz.answer]}”.`} ${pctRight}% of people got it right.`;
+  } else if (!p.quiz && p.author !== me.username) {
+    card.querySelector('.i-foot').textContent = `${total} ${plural(total, 'vote')}`;
+  }
+}
+
+function showRating(card, totals, mine) {
+  card.querySelector('.i-rate')?.remove();
+  const avg = totals.average != null ? Math.round(totals.average * 10) / 10 : null;
+  const n = totals.ratings || 0;
+  card.classList.add('answered');
+  card.querySelector('.i-score')?.remove();
+  card.querySelector('.i-q').insertAdjacentHTML('afterend', `
+    <div class="i-score"><div class="i-meter"><span style="width:${avg ? avg * 10 : 0}%"></span></div><strong>${avg ?? '–'}<small>/10</small></strong></div>`);
+  card.querySelector('.i-foot').textContent = `${n ? `Average from ${n} ${plural(n, 'rating')}` : 'No ratings yet'}${mine != null ? ` · You gave ${mine}` : ''}`;
+}
+
+actions['post-vote'] = async el => {
+  const card = el.closest('.interact'), p = interactPosts.get(el.dataset.id);
+  if (!p || p.author === me.username || card.classList.contains('answered')) return;
+  card.classList.add('answered'); // no second vote while this one saves
+  try {
+    await db.respondToMoment(p.id, 'vote', el.dataset.choice);
+    const totals = (await db.postResults([p.id]))[p.id] || {};
+    showChoiceResults(card, p, totals.votes || {}, el.dataset.choice);
+  } catch (err) { card.classList.remove('answered'); toast(`Could not save it: ${err.message}`); }
+};
+
+forms['post-answer'] = async (form, fd) => {
+  const text = String(fd.get('answer') || '').trim();
+  if (!text || form.dataset.sending) return;
+  form.dataset.sending = '1';
+  try {
+    await db.respondToMoment(form.dataset.id, 'answer', text);
+    form.replaceWith(Object.assign(document.createElement('p'), { className: 'i-done', textContent: `You answered: “${text}”` }));
+    toast('Answer sent');
+  } catch (err) { delete form.dataset.sending; toast(`Could not send it: ${err.message}`); }
+};
+
+document.addEventListener('input', e => {
+  if (e.target.matches?.('.i-rate input[type="range"]')) e.target.nextElementSibling.textContent = e.target.value;
+});
+actions['post-rate'] = async el => {
+  const card = el.closest('.interact');
+  const value = card.querySelector('.i-rate input').value;
+  el.disabled = true;
+  try {
+    await db.respondToMoment(el.dataset.id, 'rating', value);
+    showRating(card, (await db.postResults([el.dataset.id]))[el.dataset.id] || {}, value);
+  } catch (err) { el.disabled = false; toast(`Could not save it: ${err.message}`); }
+};
+
+// On your own post: who voted, guessed, answered or rated.
+actions['post-responses'] = el => {
+  const card = el.closest('.interact'), p = interactPosts.get(el.dataset.id);
+  const rows = (card.responses || []).filter(r => r.user !== me.username).sort((a, b) => b.at - a.at);
+  const it = p.poll || p.quiz;
+  const what = r => r.kind === 'vote' ? `${p.quiz ? 'Guessed' : 'Voted'} “${esc(it?.options[r.value] ?? '')}”${p.quiz ? (+r.value === p.quiz.answer ? ' (right)' : ' (wrong)') : ''}`
+    : r.kind === 'rating' ? `Rated ${esc(r.value)}/10` : `“${esc(r.value)}”`;
+  const d = document.createElement('dialog');
+  d.className = 'modal';
+  d.innerHTML = `
+    <header class="row"><h2>Responses</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
+    <ul class="i-who">${rows.map(r => `<li><a href="#/profile/${esc(r.user)}" data-action="close-dialog-to" data-href="#/profile/${esc(r.user)}">@${esc(r.user)}</a><span>${what(r)}</span><span class="muted small">${ago(r.at)}</span></li>`).join('')}</ul>`;
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+};
+actions['close-dialog-to'] = el => { el.closest('dialog').close(); go(el.dataset.href); };
+
 // ---------- scroll mode: full screen, one post at a time, and each swipe snaps to the next post (like TikTok)
 actions['scroll-mode'] = el => go(`#/scroll/${el.dataset.id}/${encodeURIComponent(el.dataset.from || 'feed')}`);
 actions['close-scroll'] = () => actions.back();
@@ -537,7 +690,7 @@ async function viewScroll(main, id, from = 'feed') {
     const licked = x.licks.includes(me.username), n = x.licks.length, b = x.barkCount || 0;
     return `
       <article class="post slide" data-post="${x.id}">
-        <div class="media">${mediaEl(x)}<span class="lick-burst">${icon('lick')}</span></div>
+        <div class="media">${mediaEl(x)}<span class="lick-burst">${icon('lick')}</span>${interactCard(x)}</div>
         <div class="slide-info">
           <a class="slide-who" href="#/profile/${esc(author.username)}">${avatar(author, 'sm')}<span><strong>${esc(author.displayName)}</strong> <span class="sub">@${esc(author.username)} · ${ago(x.createdAt)}</span></span></a>
           ${x.caption ? `<p class="slide-caption">${esc(x.caption)}</p>` : ''}
@@ -1269,7 +1422,7 @@ async function viewCreate(main, arg) {
   const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.completedAt);
   const goalId = arg?.startsWith('goal-') ? arg.slice(5) : '';
   const goal = goals.find(g => g.id === goalId);
-  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '' };
+  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '', iPos: { x: 0.5, y: 0.72, s: 1 } };
   main.innerHTML = `
     <section class="card create">
       <h1>New post</h1>
@@ -1293,23 +1446,30 @@ async function viewCreate(main, arg) {
       <div class="stage"></div>
       <form data-form="publish" class="publish stack" hidden>
         <label class="field"><span>Caption</span><textarea name="caption" maxlength="500" rows="3" placeholder="What is ${esc(me.petName || 'your pet')} up to?">${goal ? esc(`Progress on: ${goal.title}`) : ''}</textarea></label>
-        <div class="moment-extras stack" hidden>
-          <div class="field"><span>Add to your moment</span>
+        <div class="extras stack">
+          <div class="field"><span class="extras-label">Add to your post</span>
             <div class="seg extras-seg">
               <button type="button" data-action="moment-extra" data-extra="">Nothing</button>
               <button type="button" data-action="moment-extra" data-extra="poll">Poll</button>
+              <button type="button" data-action="moment-extra" data-extra="quiz" data-posts-only>Quiz</button>
               <button type="button" data-action="moment-extra" data-extra="ask">Question</button>
+              <button type="button" data-action="moment-extra" data-extra="rate" data-posts-only>Rating</button>
             </div>
           </div>
-          <div class="extra-poll stack" hidden>
-            <label class="field"><span>Poll question</span><input name="pollQuestion" maxlength="80" placeholder="Who is the goodest?"></label>
-            <div class="two">
-              <label class="field"><span>Choice 1</span><input name="pollA" maxlength="30" value="Yes"></label>
-              <label class="field"><span>Choice 2</span><input name="pollB" maxlength="30" value="No"></label>
-            </div>
+          <div class="extra-choices stack" hidden>
+            <label class="field"><span>Question</span><input name="iQuestion" maxlength="80" placeholder="Who is the goodest?"></label>
+            ${[1, 2, 3, 4].map(n => `
+              <div class="choice-row">
+                <label class="field"><span>Choice ${n}${n > 2 ? ' (optional)' : ''}</span><input name="iOpt${n}" maxlength="30" ${n === 1 ? 'value="Yes"' : n === 2 ? 'value="No"' : ''}></label>
+                <label class="quiz-right"><input type="radio" name="quizAnswer" value="${n - 1}" ${n === 1 ? 'checked' : ''}>Right answer</label>
+              </div>`).join('')}
           </div>
           <div class="extra-ask" hidden>
             <label class="field"><span>Your question</span><input name="askPrompt" maxlength="80" value="Ask me anything"></label>
+          </div>
+          <div class="extra-rate" hidden>
+            <label class="field"><span>Rating question</span><input name="rateQuestion" maxlength="80" value="How cute is this?"></label>
+            <p class="muted small">People slide from 1 to 10 and see the average.</p>
           </div>
         </div>
         ${goals.length ? `<label class="field"><span>Link to a training goal</span><select name="goal"><option value="">None</option>${goals.map(g => `<option value="${g.id}" ${g.id === goalId ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}</select></label>` : ''}
@@ -1343,10 +1503,113 @@ function updateKindUI() {
   root.querySelector('.file-input').accept = { photo: 'image/*', video: 'video/*', moment: 'image/*,video/*' }[draft.kind];
   root.querySelector('.camera-label').textContent = { photo: 'Take a photo', video: 'Record a video', moment: 'Open camera' }[draft.kind];
   root.querySelector('.file-input').multiple = draft.kind === 'moment';
-  root.querySelector('.moment-extras').hidden = draft.kind !== 'moment';
-  root.querySelectorAll('.extras-seg button').forEach(b => b.classList.toggle('on', b.dataset.extra === draft.extra));
-  root.querySelector('.extra-poll').hidden = draft.extra !== 'poll';
+  // Moments can have a poll or a question; normal posts can also have a quiz or a rating slider.
+  const moment = draft.kind === 'moment';
+  if (moment && ['quiz', 'rate'].includes(draft.extra)) draft.extra = '';
+  root.querySelector('.extras-label').textContent = moment ? 'Add to your moment' : 'Add to your post';
+  root.querySelectorAll('.extras-seg button').forEach(b => {
+    b.classList.toggle('on', b.dataset.extra === draft.extra);
+    b.hidden = moment && b.hasAttribute('data-posts-only');
+  });
+  const choices = root.querySelector('.extra-choices');
+  choices.hidden = !['poll', 'quiz'].includes(draft.extra);
+  choices.classList.toggle('quiz', draft.extra === 'quiz');
   root.querySelector('.extra-ask').hidden = draft.extra !== 'ask';
+  root.querySelector('.extra-rate').hidden = draft.extra !== 'rate';
+  renderStickerPreview();
+}
+
+// While making a post, the poll, quiz, question or rating shows on the picture as it will look.
+// Drag it to move it; drag its corner (or use the slider) to resize it.
+function previewInteractive(fd) {
+  const t = name => String(fd.get(name) || '').trim();
+  if (draft.extra === 'poll' || draft.extra === 'quiz') {
+    const filled = [1, 2, 3, 4].map(n => t(`iOpt${n}`)).filter(Boolean);
+    const it = { question: t('iQuestion') || 'Your question', options: filled.length ? filled : ['Yes', 'No'] };
+    return draft.extra === 'poll' ? { poll: it } : { quiz: { ...it, answer: 0 } };
+  }
+  if (draft.extra === 'ask') return { ask: { prompt: t('askPrompt') || 'Ask me anything' } };
+  if (draft.extra === 'rate') return { rate: { question: t('rateQuestion') || 'How cute is this?' } };
+  return null;
+}
+
+function renderStickerPreview() {
+  const root = document.querySelector('.create');
+  const preview = root?.querySelector('.preview');
+  if (!preview) return;
+  preview.querySelector('.interact')?.remove();
+  const it = draft.kind === 'moment' ? null : previewInteractive(new FormData(root.querySelector('form[data-form="publish"]')));
+  root.querySelectorAll('.i-size, .i-size-hint').forEach(el => { el.hidden = !it; });
+  if (!it) return;
+  preview.insertAdjacentHTML('beforeend', interactCard({ id: 'draft', author: '', ...it, iPos: draft.iPos }));
+  const card = preview.querySelector('.interact');
+  card.classList.add('editing');
+  card.insertAdjacentHTML('beforeend', '<span class="i-handle" aria-hidden="true"></span>');
+  root.querySelector('.i-size input').value = Math.round(draft.iPos.s * 100);
+}
+
+function placeSticker(card) {
+  card.style.left = `${draft.iPos.x * 100}%`;
+  card.style.top = `${draft.iPos.y * 100}%`;
+  card.style.setProperty('--s', draft.iPos.s);
+  const slider = document.querySelector('.create .i-size input');
+  if (slider) slider.value = Math.round(draft.iPos.s * 100);
+}
+
+let stickerDrag = null;
+document.addEventListener('pointerdown', e => {
+  const card = e.target.closest?.('.preview .interact.editing');
+  if (!card) return;
+  e.preventDefault();
+  const box = card.parentElement.getBoundingClientRect();
+  const center = { x: box.left + draft.iPos.x * box.width, y: box.top + draft.iPos.y * box.height };
+  stickerDrag = {
+    card, box, center, resize: !!e.target.closest('.i-handle'),
+    from: { x: e.clientX, y: e.clientY, pos: { ...draft.iPos }, dist: Math.hypot(e.clientX - center.x, e.clientY - center.y) || 1 },
+  };
+  card.setPointerCapture(e.pointerId);
+});
+document.addEventListener('pointermove', e => {
+  if (!stickerDrag) return;
+  const { card, box, center, resize, from } = stickerDrag;
+  if (resize) draft.iPos.s = clampSize(from.pos.s * Math.hypot(e.clientX - center.x, e.clientY - center.y) / from.dist);
+  else {
+    draft.iPos.x = clampPos(from.pos.x + (e.clientX - from.x) / box.width);
+    draft.iPos.y = clampPos(from.pos.y + (e.clientY - from.y) / box.height);
+  }
+  placeSticker(card);
+});
+const endStickerDrag = () => { stickerDrag = null; };
+document.addEventListener('pointerup', endStickerDrag);
+document.addEventListener('pointercancel', endStickerDrag);
+document.addEventListener('input', e => {
+  if (e.target.matches?.('.create .i-size input')) {
+    draft.iPos.s = clampSize(e.target.value / 100);
+    const card = document.querySelector('.create .preview .interact');
+    if (card) placeSticker(card);
+  } else if (e.target.closest?.('.create form[data-form="publish"] .extras')) renderStickerPreview();
+});
+
+// The poll, quiz, question or rating picked on the create page, ready to save on the post.
+// Returns null (after saying what's missing) if it isn't filled in properly.
+function readInteractive(form, fd) {
+  const t = name => String(fd.get(name) || '').trim();
+  const fail = (msg, field) => { toast(msg); if (field) form.querySelector(`[name="${field}"]`)?.focus(); return null; };
+  const extra = draft.extra;
+  if (extra === 'poll' || extra === 'quiz') {
+    const question = t('iQuestion');
+    const filled = [1, 2, 3, 4].map(n => [n - 1, t(`iOpt${n}`)]).filter(([, o]) => o);
+    if (!question) return fail('Write a question first.', 'iQuestion');
+    if (filled.length < 2) return fail('Fill in at least 2 choices.', 'iOpt1');
+    const options = filled.map(([, o]) => o);
+    if (extra === 'poll') return { poll: { question, options } };
+    const answer = filled.findIndex(([k]) => k === +fd.get('quizAnswer'));
+    if (answer < 0) return fail('Mark one of the choices you filled in as the right answer.');
+    return { quiz: { question, options, answer } };
+  }
+  if (extra === 'ask') return { ask: { prompt: t('askPrompt') || 'Ask me anything' } };
+  if (extra === 'rate') return { rate: { question: t('rateQuestion') || 'How cute is this?' } };
+  return {};
 }
 
 actions['moment-extra'] = el => { draft.extra = el.dataset.extra; updateKindUI(); };
@@ -1522,8 +1785,11 @@ function showResult(root) {
     <div class="preview">${r.type === 'video'
       ? `<video src="${draft.previewURL}#t=0.001" controls playsinline autoplay loop muted></video>`
       : `<img src="${draft.previewURL}" alt="Preview">`}</div>
-    ${r.type === 'image' ? `<button type="button" class="btn ghost sticker-btn" data-action="stickers">${icon('sparkle')}${count ? `Edit stickers (${count})` : 'Add stickers'}</button>` : ''}`;
+    ${r.type === 'image' ? `<button type="button" class="btn ghost sticker-btn" data-action="stickers">${icon('sparkle')}${count ? `Edit stickers (${count})` : 'Add stickers'}</button>` : ''}
+    <label class="field i-size" hidden><span>Poll or question size</span><input type="range" min="60" max="150" step="5" value="100"></label>
+    <p class="muted small i-size-hint" hidden>Drag it on the picture to move it. Drag its corner, or use the slider, to make it bigger or smaller.</p>`;
   root.querySelector('.publish').hidden = false;
+  renderStickerPreview();
 }
 
 actions.stickers = async () => {
@@ -1539,6 +1805,8 @@ actions.stickers = async () => {
 forms.publish = async (form, fd) => {
   if (!draft?.result || draft.busy) return;
   if (draft.kind === 'moment') return publishMoment(form, fd);
+  const interactive = readInteractive(form, fd);
+  if (!interactive) return;
   const btn = form.querySelector('button.primary');
   btn.disabled = true;
   const goal = fd.get('goal') ? await db.get('goals', fd.get('goal')) : null;
@@ -1560,6 +1828,8 @@ forms.publish = async (form, fd) => {
     goalTitle: goal?.title || null,
     createdAt: now,
     expiresAt: isMoment ? now + MOMENT_TTL : null,
+    ...interactive,
+    iPos: Object.keys(interactive).length ? { ...draft.iPos } : null,
   };
   try {
     await db.put('posts', post);
@@ -1577,13 +1847,9 @@ forms.publish = async (form, fd) => {
 // or question go on the first one.
 async function publishMoment(form, fd) {
   saveCurrentItem();
-  const extra = draft.extra;
-  const poll = extra === 'poll' ? {
-    question: String(fd.get('pollQuestion') || '').trim(),
-    options: [String(fd.get('pollA') || '').trim() || 'Yes', String(fd.get('pollB') || '').trim() || 'No'],
-  } : null;
-  if (poll && !poll.question) { toast('Write a poll question first.'); form.querySelector('[name="pollQuestion"]').focus(); return; }
-  const ask = extra === 'ask' ? { prompt: String(fd.get('askPrompt') || '').trim() || 'Ask me anything' } : null;
+  const interactive = readInteractive(form, fd);
+  if (!interactive) return;
+  const { poll = null, ask = null } = interactive;
   const btn = form.querySelector('button.primary');
   btn.disabled = true;
   draft.busy = true;
@@ -1993,12 +2259,14 @@ async function viewNotifications(main) {
     if (n.type === 'bark') return `${name} ${soundFor(n.user.petType).past}: “${esc(n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text)}”`;
     if (n.type === 'follow') return `${name} started following you`;
     if (n.type === 'moment-reaction') return `${name} reacted to your moment: ${esc(REACTIONS.find(([k]) => k === n.value)?.[1] || 'Lick')}`;
+    if (n.type === 'moment-vote' && n.post.quiz) return `${name} took your quiz and got it ${+n.value === n.post.quiz.answer ? 'right' : 'wrong'}`;
     if (n.type === 'moment-vote') return `${name} voted “${esc(n.post.poll?.options[n.value] ?? '')}” on your poll`;
     if (n.type === 'moment-answer') return `${name} answered your question: “${esc(n.value.length > 80 ? n.value.slice(0, 80) + '…' : n.value)}”`;
+    if (n.type === 'moment-rating') return `${name} rated your post ${esc(n.value)}/10`;
     if (n.type === 'report') return `Someone reported ${n.post ? 'your post' : 'your account'} for <strong>${esc(n.reason)}</strong>. The people who run PetPost will take a look.`;
     return `${name} ${n.post.kind === 'moment' ? 'shared a moment' : n.post.mediaType === 'video' ? 'posted a new video' : 'posted a new photo'}`;
   };
-  const iconFor = { lick: 'lick', bark: 'bark', follow: 'userPlus', post: 'photo', report: 'flag', 'moment-reaction': 'sparkle', 'moment-vote': 'check', 'moment-answer': 'bark' };
+  const iconFor = { lick: 'lick', bark: 'bark', follow: 'userPlus', post: 'photo', report: 'flag', 'moment-reaction': 'sparkle', 'moment-vote': 'check', 'moment-answer': 'bark', 'moment-rating': 'trophy' };
   main.innerHTML = `
     <section class="card">
       <h1>Notifications</h1>

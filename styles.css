@@ -765,7 +765,12 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .m-thumb-x { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; border: 0; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.6); }
 .m-thumb-x .ic { width: 12px; height: 12px; }
 .m-thumb.add { display: grid; place-items: center; color: var(--accent); border: 2px dashed var(--line); cursor: pointer; }
-.moment-extras[hidden], .extra-poll[hidden], .extra-ask[hidden] { display: none; }
+.extra-choices[hidden], .extra-ask[hidden], .extra-rate[hidden], .extras-seg button[hidden] { display: none; }
+.extras-seg { flex-wrap: wrap; }
+.choice-row { display: flex; align-items: flex-end; gap: 10px; }
+.choice-row .field { flex: 1; }
+.quiz-right { display: none; align-items: center; gap: 6px; padding-bottom: 12px; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.extra-choices.quiz .quiz-right { display: flex; }
 
 /* ---------- moments: polls, questions, reactions, activity */
 .viewer-foot {
@@ -835,3 +840,52 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .viewer .bars, .viewer header, .viewer-foot { transition: opacity .2s; }
 .viewer.holding .bars, .viewer.holding header, .viewer.holding .viewer-foot { opacity: 0; }
 .viewer input { -webkit-user-select: text; user-select: text; }
+
+/* ---------- polls, quizzes, question boxes and ratings: stickers on top of a post's photo or video */
+.interact {
+  position: absolute; z-index: 3; width: min(230px, 78%); transform: translate(-50%, -50%) scale(var(--s, 1));
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 11px; border-radius: 14px; text-align: left;
+  background: rgba(255,255,255,.95); color: #12151b; box-shadow: 0 6px 22px rgba(0,0,0,.28); font-size: 13.5px;
+}
+.i-q { margin: 0 0 1px; font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; line-height: 1.25; }
+.i-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #fff; background: var(--accent); border-radius: 999px; padding: 2px 7px; }
+.i-choice { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 10px; border-radius: 10px; border: 1.5px solid #e3e6ee; background: #fff; color: inherit; font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+.i-choice:disabled { cursor: default; opacity: 1; }
+.i-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: color-mix(in srgb, var(--accent) 20%, transparent); transition: width .4s ease-out; }
+.i-label, .i-pct { position: relative; }
+.interact:not(.answered) .i-pct { display: none; }
+.interact.answered .i-choice { cursor: default; }
+.i-choice.mine { border-color: var(--accent); }
+.i-choice.right { border-color: #2fbf71; }
+.i-choice.right .i-fill { background: color-mix(in srgb, #2fbf71 24%, transparent); }
+.i-choice.wrong { border-color: #e5484d; }
+.i-choice.wrong .i-fill { background: color-mix(in srgb, #e5484d 18%, transparent); }
+.i-foot { margin: 0; font-size: 11.5px; color: #5c6472; }
+.i-foot:empty { display: none; }
+.i-link { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: var(--accent); cursor: pointer; }
+.i-answer { display: flex; gap: 6px; }
+.i-answer input { flex: 1; min-width: 0; padding: 7px 9px; border-radius: 10px; border: 1.5px solid #e3e6ee; background: #fff; color: #12151b; font: inherit; }
+.i-answer .btn.sm { height: 32px; padding: 0 11px; font-size: 13px; }
+.i-done { margin: 0; color: #5c6472; overflow-wrap: anywhere; }
+.i-rate { display: flex; align-items: center; gap: 8px; }
+.i-rate input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.i-rate output { min-width: 2ch; font-weight: 700; font-size: 15px; text-align: center; }
+.i-rate .btn.sm { height: 32px; padding: 0 11px; font-size: 13px; }
+.i-score { display: flex; align-items: center; gap: 8px; }
+.i-meter { flex: 1; height: 8px; border-radius: 999px; background: #e3e6ee; overflow: hidden; }
+.i-meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .4s ease-out; }
+.i-score strong { font-size: 17px; }
+.i-score small { font-size: 11px; color: #5c6472; font-weight: 600; }
+.i-who { list-style: none; margin: 0; padding: 0; }
+.i-who li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.i-who li span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notif-ic.moment-rating { background: #f59f00; }
+
+/* Placing the poll or question on the picture while making a post */
+.preview { position: relative; }
+.interact.editing { cursor: grab; touch-action: none; outline: 2px dashed rgba(255,255,255,.95); outline-offset: 4px; }
+.interact.editing * { pointer-events: none; }
+.interact.editing .i-handle { pointer-events: auto; }
+.i-handle { position: absolute; right: -11px; bottom: -11px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); cursor: nwse-resize; touch-action: none; }
+.i-size[hidden], .i-size-hint[hidden] { display: none; }
+.i-size input { accent-color: var(--accent); }
