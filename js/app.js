@@ -2273,9 +2273,16 @@ document.addEventListener('visibilitychange', async () => {
 function setUpUpdates() {
   const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('sw.js').then(reg => {
-    const check = () => reg.update().catch(() => {});
+    // Look for a newer version often (but at most once a minute), so a screen left open still updates.
+    let lastCheck = 0;
+    const check = () => {
+      if (Date.now() - lastCheck < 60 * 1000) return;
+      lastCheck = Date.now();
+      reg.update().catch(() => {});
+    };
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
-    setInterval(check, 30 * 60 * 1000);
+    ['hashchange', 'focus', 'pageshow'].forEach(type => window.addEventListener(type, check, true));
+    setInterval(check, 5 * 60 * 1000);
   }).catch(err => console.warn('Offline mode unavailable', err));
 
   let reloading = false;
