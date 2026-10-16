@@ -68,10 +68,12 @@ async function notesFor(table: string, r: any): Promise<Note[]> {
     const who = await person(r.user_id);
     if (!who) return [];
     const value = String(r.value || '');
-    const body = r.kind === 'vote' ? `${who.name} voted on your poll`
+    const moment = p.data?.kind === 'moment';
+    const body = r.kind === 'vote' ? `${who.name} voted on your ${moment ? 'moment' : 'post'}`
       : r.kind === 'answer' ? `${who.name} answered your question: "${value.length > 90 ? value.slice(0, 90) + '...' : value}"`
+      : r.kind === 'rating' ? `${who.name} rated your post`
       : `${who.name} reacted to your moment`;
-    return [{ to: p.author, body, url: '#/notifications', tag: `moment-${r.kind}-${r.post_id}-${who.id}` }];
+    return [{ to: p.author, body, url: moment ? '#/notifications' : `#/post/${p.id}`, tag: `response-${r.kind}-${r.post_id}-${who.id}` }];
   }
   if (table === 'posts') {
     const who = await person(r.author);
