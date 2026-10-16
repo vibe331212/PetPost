@@ -549,7 +549,7 @@ function postCard(p, author, from = 'feed') {
       <header class="post-head">
         <a href="#/profile/${esc(author.username)}">${avatar(author)}</a>
         <div class="who">
-          <a href="#/profile/${esc(author.username)}" class="name">${esc(author.displayName)}</a>${aiTag(author)}
+          <a href="#/profile/${esc(author.username)}" class="name">${esc(author.displayName)}${aiTag(author)}</a>
           <span class="sub">@${esc(author.username)}${p.petName || author.petName ? ` · ${esc(p.petName || author.petName)}` : ''} · ${ago(p.createdAt)}</span>
         </div>
         ${own ? `<button class="icon-btn" data-action="delete-post" data-id="${p.id}" aria-label="Delete post">${icon('trash')}</button>`
@@ -1322,7 +1322,7 @@ function barkRow(c, author, post) {
     <div class="bark" data-bark="${c.id}">
       <a href="#/profile/${esc(c.author)}">${avatar(author, 'sm')}</a>
       <div class="bark-body">
-        <p><a class="name" href="#/profile/${esc(c.author)}">${esc(author?.displayName || c.author)}</a> <span class="sub">${soundFor(author?.petType).past} · ${ago(c.createdAt)}</span></p>
+        <p><a class="name" href="#/profile/${esc(c.author)}">${esc(author?.displayName || c.author)}${aiTag(author)}</a> <span class="sub">${soundFor(author?.petType).past} · ${ago(c.createdAt)}</span></p>
         <p>${esc(c.text)}</p>
       </div>
       ${canDelete ? `<button class="icon-btn sm" data-action="delete-bark" data-id="${c.id}" data-post="${post.id}" aria-label="Delete comment">${icon('trash')}</button>` : ''}
@@ -2427,7 +2427,7 @@ async function viewNotifications(main) {
     ? `<video src="${blobURL(p.id, p.media)}#t=0.1" muted playsinline preload="metadata"></video>`
     : `<img src="${blobURL(p.id, p.media)}" alt="" loading="lazy">`;
   const line = n => {
-    const name = `<strong>${esc(n.user.displayName)}</strong>`;
+    const name = `<strong>${esc(n.user.displayName)}</strong>${aiTag(n.user)}`;
     if (n.type === 'lick') return `${name} licked your post`;
     if (n.type === 'bark') return `${name} ${soundFor(n.user.petType).past}: “${esc(n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text)}”`;
     if (n.type === 'follow') return `${name} started following you`;
@@ -2921,14 +2921,18 @@ function trophyHeadline(t, own) {
 // Whoever's posts got the most licks, and the most barks, on all of PetPost. They aren't saved: they
 // move to whoever beats the record. AI sample accounts can't hold records.
 async function recordHolders() {
-  const [posts, users] = await Promise.all([db.all('posts'), db.all('users')]);
+  const [posts, users, comments] = await Promise.all([db.all('posts'), db.all('users'), db.all('comments')]);
   const ai = new Set(users.filter(u => u.ai).map(u => u.username));
   const totals = {};
+  const authorOf = new Map(posts.map(p => [p.id, p.author]));
   for (const p of posts) {
     if (ai.has(p.author)) continue;
     const t = totals[p.author] ||= { licks: 0, barks: 0 };
-    t.licks += (p.licks || []).length;
-    t.barks += p.barkCount || 0;
+    t.licks += (p.licks || []).filter(n => !ai.has(n)).length; // licks from AI accounts don't count
+  }
+  for (const c of comments) {
+    const t = totals[authorOf.get(c.postId)];
+    if (t && !ai.has(c.author)) t.barks++;
   }
   const top = key => {
     const best = Math.max(0, ...Object.values(totals).map(t => t[key]));
@@ -2992,7 +2996,7 @@ function trophyBarks(barks, owner) {
         <div class="bark">
           <a href="#/profile/${esc(c.user)}">${avatar(who, 'sm')}</a>
           <div class="bark-body">
-            <p><a class="name" href="#/profile/${esc(c.user)}">${esc(who.displayName)}</a> <span class="sub">${soundFor(who.petType).past} · ${ago(c.createdAt)}</span></p>
+            <p><a class="name" href="#/profile/${esc(c.user)}">${esc(who.displayName)}${aiTag(who)}</a> <span class="sub">${soundFor(who.petType).past} · ${ago(c.createdAt)}</span></p>
             <p>${esc(c.text)}</p>
           </div>
           ${canDelete ? `<button class="icon-btn sm" data-action="trophy-bark-delete" data-id="${esc(c.id)}" aria-label="Delete">${icon('trash')}</button>` : ''}

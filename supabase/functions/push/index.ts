@@ -20,7 +20,8 @@ const pastFor = (petType = '') => SOUNDS.find(([re]) => re.test(petType.trim().t
 type Person = { id: string; username: string; name: string; petType: string };
 async function person(id: string): Promise<Person | null> {
   const { data } = await sb.from('profiles').select('id, username, data').eq('id', id).maybeSingle();
-  return data ? { id: data.id, username: data.username, name: data.data?.displayName || data.username, petType: data.data?.petType || '' } : null;
+  // AI sample accounts are always named as AI, so nobody thinks a real person licked or commented.
+  return data ? { id: data.id, username: data.username, name: `${data.data?.displayName || data.username}${data.data?.ai ? ' (AI)' : ''}`, petType: data.data?.petType || '' } : null;
 }
 async function post(id: string) {
   const { data } = await sb.from('posts').select('id, author, data').eq('id', id).maybeSingle();

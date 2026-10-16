@@ -922,5 +922,5 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .trophy-card .bark-form { margin-top: 10px; }
 .trophy.record .trophy-icon { background: linear-gradient(135deg, #ffd6e7, #ff5a8a 55%, #7b5cff); color: #fff; }
 /* AI sample accounts */
-.ai-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .06em; vertical-align: middle; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ai-tag { display: inline-block; width: auto; margin-left: 5px; padding: 0 4px; border-radius: 4px; font-size: 9px; line-height: 14px; font-weight: 700; letter-spacing: .04em; vertical-align: 2px; color: var(--muted); border: 1px solid var(--line); background: none; }
 h1 .ai-tag { font-size: 12px; }
