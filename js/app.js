@@ -651,7 +651,7 @@ async function viewFeed(main) {
   const feed = posts.filter(p => p.kind !== 'moment' && (mode === 'all' || following.has(p.author))).sort((a, b) => b.createdAt - a.createdAt);
 
   // clean up expired moments
-  posts.filter(p => p.kind === 'moment' && p.expiresAt <= now && p.author === me.username).forEach(p => deletePost(p.id));
+  posts.filter(p => p.kind === 'moment' && p.expiresAt <= now && p.author === me.username && !p.highlight).forEach(p => deletePost(p.id));
 
   const groups = new Map();
   posts.filter(p => p.kind === 'moment' && p.expiresAt > now)
@@ -804,21 +804,25 @@ actions['feed-mode'] = el => {
 };
 
 // ---------- moments viewer
-actions['open-moments'] = el => openViewer(+el.dataset.index);
+// Moments play one after another: photos for a few seconds, videos to the end. Polls, questions and
+// reactions sit on top; the person who posted sees who reacted, voted and answered.
+const REACTIONS = [['lick', 'Lick'], ['flame', 'Fire'], ['sparkle', 'Wow'], ['paw', 'Paws up']];
+actions['open-moments'] = el => openViewer(momentGroups, +el.dataset.index);
 
-function openViewer(gi) {
+function openViewer(groups, gi, i = 0) {
   closeViewer();
   const el = document.createElement('div');
   el.className = 'viewer';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', 'Moments');
   document.body.append(el);
-  viewer = { el, gi, i: 0, raf: 0 };
+  viewer = { el, groups, gi, i, raf: 0, paused: 0 };
   document.addEventListener('keydown', viewerKeys);
   showMoment();
 }
 
 function viewerKeys(e) {
+  if (e.target.closest?.('input, textarea')) return;
   if (e.key === 'Escape') closeViewer();
   if (e.key === 'ArrowRight') stepMoment(1);
   if (e.key === 'ArrowLeft') stepMoment(-1);
@@ -832,25 +836,63 @@ function closeViewer() {
   document.removeEventListener('keydown', viewerKeys);
 }
 
+// Pausing is counted, so typing an answer while the activity list is open still keeps it paused.
+function pauseMoment() {
+  if (!viewer) return;
+  viewer.paused++;
+  viewer.el.querySelector('.viewer-media video')?.pause();
+}
+function resumeMoment() {
+  if (!viewer || !viewer.paused) return;
+  if (--viewer.paused) return;
+  viewer.el.querySelector('.viewer-media video')?.play().catch(() => {});
+}
+
 function showMoment() {
-  const g = momentGroups[viewer.gi];
+  const g = viewer.groups[viewer.gi];
   if (!g) return closeViewer();
   const m = g.list[viewer.i];
+  const own = m.author === me.username;
   cancelAnimationFrame(viewer.raf);
+  viewer.paused = 0;
   viewer.el.innerHTML = `
-    <div class="viewer-inner">
+    <div class="viewer-inner" data-post="${m.id}">
       <div class="bars">${g.list.map((_, k) => `<span><i style="width:${k < viewer.i ? 100 : 0}%"></i></span>`).join('')}</div>
       <header>
         ${avatar(g.user, 'sm')}
         <strong>${esc(g.user.displayName)}</strong><span class="muted-light">${ago(m.createdAt)}</span>
         <span class="spacer"></span>
-        ${m.author === me.username ? `<button class="icon-btn light" data-action="delete-moment" data-id="${m.id}" aria-label="Delete moment">${icon('trash')}</button>` : ''}
+        ${own ? `<button class="icon-btn light" data-action="delete-moment" data-id="${m.id}" aria-label="Delete moment">${icon('trash')}</button>` : ''}
         <button class="icon-btn light" data-action="close-viewer" aria-label="Close">${icon('close')}</button>
       </header>
       <div class="viewer-media">${m.mediaType === 'video'
         ? `<video src="${blobURL(m.id, m.media)}" playsinline autoplay></video>`
         : `<img src="${blobURL(m.id, m.media)}" alt="Moment from ${esc(g.user.displayName)}">`}</div>
-      ${m.caption ? `<p class="viewer-cap">${esc(m.caption)}</p>` : ''}
+      ${m.poll ? `
+        <div class="m-card m-poll">
+          <strong>${esc(m.poll.question)}</strong>
+          ${m.poll.options.map((o, k) => `<button type="button" class="m-choice" data-action="moment-vote" data-choice="${k}"><span class="m-fill"></span><span class="m-label">${esc(o)}</span><span class="m-pct"></span></button>`).join('')}
+        </div>` : ''}
+      ${m.ask ? `
+        <div class="m-card m-ask">
+          <strong>${esc(m.ask.prompt)}</strong>
+          ${own ? '<p class="m-note">Answers show up in your activity.</p>' : `
+            <form data-form="moment-answer" class="m-answer">
+              <input name="answer" maxlength="300" placeholder="Type your answer" autocomplete="off" aria-label="Your answer">
+              <button class="btn primary sm">Send</button>
+            </form>`}
+        </div>` : ''}
+      <div class="viewer-foot">
+        ${m.caption ? `<p class="viewer-cap">${esc(m.caption)}</p>` : ''}
+        ${own ? `
+          <div class="m-bar">
+            <button type="button" class="m-pill" data-action="moment-activity">${icon('users')}<span>Activity</span><span class="m-count"></span></button>
+            <button type="button" class="m-pill ${m.highlight ? 'on' : ''}" data-action="moment-highlight" aria-pressed="${!!m.highlight}">${icon('sparkle')}<span>${m.highlight ? 'In highlights' : 'Add to highlights'}</span></button>
+          </div>` : `
+          <div class="m-bar m-reactions">
+            ${REACTIONS.map(([k, label]) => `<button type="button" class="m-react" data-action="moment-react" data-reaction="${k}" aria-label="${label}" aria-pressed="false">${icon(k)}</button>`).join('')}
+          </div>`}
+      </div>
       <button class="tap prev" data-action="moment-prev" aria-label="Previous"></button>
       <button class="tap next" data-action="moment-next" aria-label="Next"></button>
     </div>`;
@@ -861,27 +903,145 @@ function showMoment() {
     video.ontimeupdate = () => { bar.style.width = `${(video.currentTime / video.duration) * 100 || 0}%`; };
     video.onended = () => stepMoment(1);
   } else {
-    const start = performance.now();
+    // Longer when there's a poll or question to read.
+    const length = m.poll || m.ask ? 9000 : 5000;
+    let elapsed = 0, last = performance.now();
     const tick = now => {
-      const f = Math.min(1, (now - start) / 5000);
+      if (!viewer) return;
+      if (!viewer.paused) elapsed += now - last;
+      last = now;
+      const f = Math.min(1, elapsed / length);
       bar.style.width = `${f * 100}%`;
       if (f >= 1) stepMoment(1); else viewer.raf = requestAnimationFrame(tick);
     };
     viewer.raf = requestAnimationFrame(tick);
   }
+  loadMomentResponses(m);
 }
+
+// Fill in your vote, answer and reaction (and, on your own moment, everyone's) once they load.
+async function loadMomentResponses(m) {
+  let rows;
+  try { rows = await db.momentResponses(m.id); } catch { return; } // database not updated yet
+  const root = viewer?.el.querySelector(`.viewer-inner[data-post="${m.id}"]`);
+  if (!root) return;
+  const mine = Object.fromEntries(rows.filter(r => r.user === me.username).map(r => [r.kind, r.value]));
+  m.responses = rows;
+  if (mine.reaction) root.querySelector(`[data-reaction="${mine.reaction}"]`)?.classList.add('on');
+  if (mine.answer) showAnswered(root);
+  if (m.author === me.username) {
+    const others = rows.filter(r => r.user !== me.username).length;
+    root.querySelector('.m-count').textContent = others ? others : '';
+    if (m.poll) showPollResults(root, m, countVotes(rows));
+  } else if (m.poll && mine.vote != null) {
+    showPollResults(root, m, await db.pollResults(m.id).catch(() => ({})), mine.vote);
+  }
+}
+
+const countVotes = rows => rows.filter(r => r.kind === 'vote').reduce((acc, r) => ({ ...acc, [r.value]: (acc[r.value] || 0) + 1 }), {});
+
+function showPollResults(root, m, counts, myChoice) {
+  const total = m.poll.options.reduce((n, _, k) => n + (counts[k] || 0), 0);
+  root.querySelector('.m-poll')?.classList.add('voted');
+  root.querySelectorAll('.m-choice').forEach(b => {
+    const k = b.dataset.choice, pct = total ? Math.round(((counts[k] || 0) / total) * 100) : 0;
+    b.querySelector('.m-fill').style.width = `${pct}%`;
+    b.querySelector('.m-pct').textContent = `${pct}%`;
+    b.classList.toggle('mine', myChoice != null && String(myChoice) === k);
+  });
+}
+
+function showAnswered(root) {
+  const form = root.querySelector('.m-answer');
+  if (form) form.outerHTML = '<p class="m-note">Answer sent</p>';
+}
+
+actions['moment-vote'] = async el => {
+  const root = el.closest('.viewer-inner');
+  const m = currentMoment();
+  if (!m || m.author === me.username || root.querySelector('.m-poll.voted')) return;
+  try {
+    await db.respondToMoment(m.id, 'vote', el.dataset.choice);
+    showPollResults(root, m, await db.pollResults(m.id), el.dataset.choice);
+  } catch (err) { toast(`Could not vote: ${err.message}`); }
+};
+
+forms['moment-answer'] = async (form, fd) => {
+  const text = String(fd.get('answer') || '').trim();
+  const m = currentMoment();
+  if (!text || !m || form.dataset.sending) return;
+  form.dataset.sending = '1';
+  try {
+    await db.respondToMoment(m.id, 'answer', text);
+    form.querySelector('input').blur();
+    showAnswered(form.closest('.viewer-inner'));
+    toast('Answer sent');
+  } catch (err) {
+    delete form.dataset.sending;
+    toast(`Could not send it: ${err.message}`);
+  }
+};
+
+actions['moment-react'] = async el => {
+  const m = currentMoment();
+  if (!m) return;
+  const on = !el.classList.contains('on');
+  el.parentElement.querySelectorAll('.m-react').forEach(b => { b.classList.toggle('on', b === el && on); b.setAttribute('aria-pressed', b === el && on); });
+  if (on) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+  try { await db.respondToMoment(m.id, 'reaction', on ? el.dataset.reaction : null); }
+  catch (err) { toast(`Could not react: ${err.message}`); }
+};
+
+actions['moment-highlight'] = async el => {
+  const m = currentMoment();
+  if (!m || m.author !== me.username) return;
+  m.highlight = !m.highlight;
+  try {
+    await db.put('posts', m);
+    el.classList.toggle('on', m.highlight);
+    el.setAttribute('aria-pressed', m.highlight);
+    el.querySelector('span').textContent = m.highlight ? 'In highlights' : 'Add to highlights';
+    toast(m.highlight ? 'Added to your highlights. It stays on your profile.' : 'Removed from your highlights');
+  } catch (err) { m.highlight = !m.highlight; toast(`Could not save: ${err.message}`); }
+};
+
+// Who reacted, voted and answered, on your own moment.
+actions['moment-activity'] = el => {
+  const m = currentMoment();
+  const root = el.closest('.viewer-inner');
+  if (!m || root.querySelector('.m-activity')) return;
+  const rows = (m.responses || []).filter(r => r.user !== me.username).sort((a, b) => b.at - a.at);
+  const line = r => r.kind === 'reaction' ? `${icon(r.value)}<span>${esc(REACTIONS.find(([k]) => k === r.value)?.[1] || 'Reacted')}</span>`
+    : r.kind === 'vote' ? `${icon('check')}<span>Voted “${esc(m.poll?.options[r.value] ?? '')}”</span>`
+    : `${icon('bark')}<span>“${esc(r.value)}”</span>`;
+  pauseMoment();
+  root.insertAdjacentHTML('beforeend', `
+    <div class="m-activity">
+      <header class="row"><h2>Activity</h2><span class="spacer"></span><button class="icon-btn light" data-action="moment-activity-close" aria-label="Close activity">${icon('close')}</button></header>
+      ${rows.length ? `<ul>${rows.map(r => `<li><a href="#/profile/${esc(r.user)}" data-action="close-viewer-to" data-href="#/profile/${esc(r.user)}"><strong>@${esc(r.user)}</strong></a><span class="m-what">${line(r)}</span><span class="muted-light">${ago(r.at)}</span></li>`).join('')}</ul>`
+        : '<p class="m-note">No reactions, votes or answers yet.</p>'}
+    </div>`);
+};
+actions['moment-activity-close'] = el => { el.closest('.m-activity').remove(); resumeMoment(); };
+actions['close-viewer-to'] = el => { closeViewer(); go(el.dataset.href); };
+
+const currentMoment = () => viewer?.groups[viewer.gi]?.list[viewer.i];
+
+// Typing an answer pauses the moment until you're done.
+document.addEventListener('focusin', e => { if (e.target.closest?.('.viewer .m-answer')) pauseMoment(); });
+document.addEventListener('focusout', e => { if (e.target.closest?.('.viewer .m-answer')) resumeMoment(); });
 
 function stepMoment(dir) {
   if (!viewer) return;
-  const g = momentGroups[viewer.gi];
+  const g = viewer.groups[viewer.gi];
   viewer.i += dir;
   if (viewer.i >= g.list.length) { viewer.gi++; viewer.i = 0; }
   else if (viewer.i < 0) {
     viewer.gi--;
     if (viewer.gi < 0) { viewer.gi = 0; viewer.i = 0; }
-    else viewer.i = momentGroups[viewer.gi].list.length - 1;
+    else viewer.i = viewer.groups[viewer.gi].list.length - 1;
   }
-  if (viewer.gi >= momentGroups.length) return closeViewer();
+  if (viewer.gi >= viewer.groups.length) return closeViewer();
   showMoment();
 }
 
@@ -1043,14 +1203,14 @@ actions['delete-bark'] = async el => {
 const KIND_HINTS = {
   photo: 'Snap or upload a photo of your pet.',
   video: `Record or upload a video up to ${MAX_VIDEO_SECONDS} seconds long.`,
-  moment: 'A photo or short video that disappears after 24 hours.',
+  moment: 'Up to 5 photos or short videos that disappear after 24 hours. You can add a poll or a question.',
 };
 
 async function viewCreate(main, arg) {
   const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.completedAt);
   const goalId = arg?.startsWith('goal-') ? arg.slice(5) : '';
   const goal = goals.find(g => g.id === goalId);
-  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null };
+  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '' };
   main.innerHTML = `
     <section class="card create">
       <h1>New post</h1>
@@ -1074,6 +1234,25 @@ async function viewCreate(main, arg) {
       <div class="stage"></div>
       <form data-form="publish" class="publish stack" hidden>
         <label class="field"><span>Caption</span><textarea name="caption" maxlength="500" rows="3" placeholder="What is ${esc(me.petName || 'your pet')} up to?">${goal ? esc(`Progress on: ${goal.title}`) : ''}</textarea></label>
+        <div class="moment-extras stack" hidden>
+          <div class="field"><span>Add to your moment</span>
+            <div class="seg extras-seg">
+              <button type="button" data-action="moment-extra" data-extra="">Nothing</button>
+              <button type="button" data-action="moment-extra" data-extra="poll">Poll</button>
+              <button type="button" data-action="moment-extra" data-extra="ask">Question</button>
+            </div>
+          </div>
+          <div class="extra-poll stack" hidden>
+            <label class="field"><span>Poll question</span><input name="pollQuestion" maxlength="80" placeholder="Who is the goodest?"></label>
+            <div class="two">
+              <label class="field"><span>Choice 1</span><input name="pollA" maxlength="30" value="Yes"></label>
+              <label class="field"><span>Choice 2</span><input name="pollB" maxlength="30" value="No"></label>
+            </div>
+          </div>
+          <div class="extra-ask" hidden>
+            <label class="field"><span>Your question</span><input name="askPrompt" maxlength="80" value="Ask me anything"></label>
+          </div>
+        </div>
         ${goals.length ? `<label class="field"><span>Link to a training goal</span><select name="goal"><option value="">None</option>${goals.map(g => `<option value="${g.id}" ${g.id === goalId ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}</select></label>` : ''}
         <div class="row wrap">
           <button type="button" class="btn ghost" data-action="reset-create">Choose another</button>
@@ -1086,14 +1265,13 @@ async function viewCreate(main, arg) {
 
   const input = main.querySelector('.file-input');
   const drop = main.querySelector('.drop');
-  input.addEventListener('change', () => input.files[0] && handleFile(input.files[0]));
+  input.addEventListener('change', () => input.files.length && handleFiles([...input.files]));
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', e => {
     e.preventDefault();
     drop.classList.remove('over');
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    if (e.dataTransfer.files.length) handleFiles([...e.dataTransfer.files]);
   });
   updateKindUI();
 }
@@ -1105,7 +1283,53 @@ function updateKindUI() {
   root.querySelector('.kind-hint').textContent = KIND_HINTS[draft.kind];
   root.querySelector('.file-input').accept = { photo: 'image/*', video: 'video/*', moment: 'image/*,video/*' }[draft.kind];
   root.querySelector('.camera-label').textContent = { photo: 'Take a photo', video: 'Record a video', moment: 'Open camera' }[draft.kind];
+  root.querySelector('.file-input').multiple = draft.kind === 'moment';
+  root.querySelector('.moment-extras').hidden = draft.kind !== 'moment';
+  root.querySelectorAll('.extras-seg button').forEach(b => b.classList.toggle('on', b.dataset.extra === draft.extra));
+  root.querySelector('.extra-poll').hidden = draft.extra !== 'poll';
+  root.querySelector('.extra-ask').hidden = draft.extra !== 'ask';
 }
+
+actions['moment-extra'] = el => { draft.extra = el.dataset.extra; updateKindUI(); };
+
+// A moment can hold up to 5 photos or videos. Each one is kept as its own item while you make it.
+const MOMENT_MAX = 5;
+function saveCurrentItem() {
+  const it = draft?.items?.[draft.cur];
+  if (it) Object.assign(it, { result: draft.result, baseBlob: draft.baseBlob, stickers: draft.stickers });
+}
+function useItem(i) {
+  const it = draft.items[i];
+  if (it) Object.assign(draft, { cur: i, result: it.result, baseBlob: it.baseBlob, stickers: it.stickers });
+}
+function loadItem(i) { saveCurrentItem(); useItem(i); }
+function dropItemThumbs(items = []) { items.forEach(it => it.thumbURL && URL.revokeObjectURL(it.thumbURL)); }
+
+async function handleFiles(files) {
+  if (draft.kind !== 'moment') return handleFile(files[0]);
+  const room = MOMENT_MAX - draft.items.length;
+  if (!room) return toast(`A moment can have up to ${MOMENT_MAX} photos or videos.`);
+  if (files.length > room) toast(`A moment can have up to ${MOMENT_MAX}. Adding the first ${room}.`);
+  for (const f of files.slice(0, room)) await handleFile(f);
+}
+
+actions['moment-item'] = el => {
+  if (draft.busy) return;
+  loadItem(+el.dataset.index);
+  showResult(document.querySelector('.create'));
+};
+actions['moment-remove'] = el => {
+  if (draft.busy) return;
+  saveCurrentItem();
+  const i = +el.dataset.index;
+  dropItemThumbs(draft.items.splice(i, 1));
+  if (!draft.items.length) return resetDraft();
+  useItem(Math.min(i, draft.items.length - 1));
+  showResult(document.querySelector('.create'));
+};
+document.addEventListener('change', e => {
+  if (e.target.matches?.('.m-add-input') && e.target.files.length) handleFiles([...e.target.files]);
+});
 
 actions['open-camera'] = async () => {
   if (!draft || draft.busy) return;
@@ -1118,12 +1342,12 @@ actions['open-camera'] = async () => {
   }
   const modes = { photo: ['photo'], video: ['video'], moment: ['photo', 'video'] }[draft.kind];
   const file = await openCamera({ modes, maxSeconds: MAX_VIDEO_SECONDS });
-  if (file && draft && document.querySelector('.create')) handleFile(file);
+  if (file && draft && document.querySelector('.create')) handleFiles([file]);
 };
 
 function resetDraft() {
   if (draft?.previewURL) URL.revokeObjectURL(draft.previewURL);
-  if (draft) { draft.result = null; draft.previewURL = null; draft.file = null; draft.baseBlob = null; draft.stickers = []; }
+  if (draft) { dropItemThumbs(draft.items); draft.items = []; draft.cur = 0; draft.result = null; draft.previewURL = null; draft.file = null; draft.baseBlob = null; draft.stickers = []; }
   const root = document.querySelector('.create');
   if (!root) return;
   root.querySelector('.stage').innerHTML = '';
@@ -1156,6 +1380,8 @@ async function handleFile(file) {
   }
   if (file.size > 300 * 1024 * 1024) return toast('That file is too large (300 MB max).');
 
+  const moment = draft.kind === 'moment', had = moment ? draft.items.length : 0;
+  if (moment) saveCurrentItem();
   draft.busy = true;
   draft.file = file;
   draft.baseBlob = null;
@@ -1189,9 +1415,18 @@ async function handleFile(file) {
       draft.result = await processVideo(file);
     }
     if (!document.body.contains(stage)) return;
+    if (moment) { draft.items.push({ result: draft.result, baseBlob: null, stickers: [] }); draft.cur = draft.items.length - 1; }
     showResult(root);
   } catch (err) {
     console.error(err);
+    if (moment && had) {
+      // Keep the photos and videos already added; just say this one didn't work.
+      toast(err.message || 'This file could not be processed.');
+      useItem(Math.min(draft.cur, had - 1));
+      draft.busy = false;
+      showResult(root);
+      return;
+    }
     stage.innerHTML = `<div class="error-box">${esc(err.message || 'This file could not be processed.')}</div>`;
     root.querySelector('.source').hidden = false;
     draft.file = null;
@@ -1206,7 +1441,25 @@ function showResult(root) {
   draft.previewURL = URL.createObjectURL(r.blob);
   if (r.type === 'image' && !draft.baseBlob) { draft.baseBlob = r.blob; draft.stickers = []; }
   const count = draft.stickers?.length || 0;
-  root.querySelector('.stage').innerHTML = `
+  let strip = '';
+  if (draft.kind === 'moment') {
+    saveCurrentItem();
+    for (const it of draft.items) {
+      if (it.thumbBlob !== it.result.blob) { if (it.thumbURL) URL.revokeObjectURL(it.thumbURL); it.thumbURL = URL.createObjectURL(it.result.blob); it.thumbBlob = it.result.blob; }
+    }
+    strip = `
+      <div class="m-strip">
+        ${draft.items.map((it, i) => `
+          <div class="m-thumb ${i === draft.cur ? 'on' : ''}">
+            <button type="button" data-action="moment-item" data-index="${i}" aria-label="Show ${i + 1} of ${draft.items.length}">${it.result.type === 'video'
+              ? `<video src="${it.thumbURL}#t=0.1" muted playsinline preload="metadata"></video>` : `<img src="${it.thumbURL}" alt="">`}</button>
+            <button type="button" class="m-thumb-x" data-action="moment-remove" data-index="${i}" aria-label="Remove ${i + 1}">${icon('close')}</button>
+          </div>`).join('')}
+        ${draft.items.length < MOMENT_MAX ? `<label class="m-thumb add" title="Add another">${icon('plus')}<input type="file" class="m-add-input" accept="image/*,video/*" multiple hidden></label>` : ''}
+      </div>
+      <p class="muted small">${draft.items.length} of ${MOMENT_MAX}. They play one after another.</p>`;
+  }
+  root.querySelector('.stage').innerHTML = `${strip}
     <div class="preview">${r.type === 'video'
       ? `<video src="${draft.previewURL}#t=0.001" controls playsinline autoplay loop muted></video>`
       : `<img src="${draft.previewURL}" alt="Preview">`}</div>
@@ -1226,6 +1479,7 @@ actions.stickers = async () => {
 
 forms.publish = async (form, fd) => {
   if (!draft?.result || draft.busy) return;
+  if (draft.kind === 'moment') return publishMoment(form, fd);
   const btn = form.querySelector('button.primary');
   btn.disabled = true;
   const goal = fd.get('goal') ? await db.get('goals', fd.get('goal')) : null;
@@ -1260,6 +1514,46 @@ forms.publish = async (form, fd) => {
   go('#/feed');
 };
 
+// Each photo or video in a moment is saved as its own post, in order. The caption and any poll
+// or question go on the first one.
+async function publishMoment(form, fd) {
+  saveCurrentItem();
+  const extra = draft.extra;
+  const poll = extra === 'poll' ? {
+    question: String(fd.get('pollQuestion') || '').trim(),
+    options: [String(fd.get('pollA') || '').trim() || 'Yes', String(fd.get('pollB') || '').trim() || 'No'],
+  } : null;
+  if (poll && !poll.question) { toast('Write a poll question first.'); form.querySelector('[name="pollQuestion"]').focus(); return; }
+  const ask = extra === 'ask' ? { prompt: String(fd.get('askPrompt') || '').trim() || 'Ask me anything' } : null;
+  const btn = form.querySelector('button.primary');
+  btn.disabled = true;
+  draft.busy = true;
+  const now = Date.now();
+  const items = draft.items;
+  try {
+    for (const [i, it] of items.entries()) {
+      if (items.length > 1) toast(`Sharing ${i + 1} of ${items.length}...`);
+      await db.put('posts', {
+        id: db.uid(), author: me.username, kind: 'moment', mediaType: it.result.type,
+        width: it.result.width || null, height: it.result.height || null, media: it.result.blob,
+        caption: i === 0 ? String(fd.get('caption') || '').trim() : '',
+        poll: i === 0 ? poll : null, ask: i === 0 ? ask : null,
+        licks: [], barkCount: 0, report: it.result.report, goalId: null, goalTitle: null,
+        createdAt: now + i, expiresAt: now + MOMENT_TTL,
+      });
+    }
+  } catch (err) {
+    btn.disabled = false;
+    draft.busy = false;
+    return toast(`Could not share it: ${err.message}`);
+  }
+  draft.busy = false;
+  resetDraft();
+  draft = null;
+  toast('Moment shared for 24 hours');
+  go('#/feed');
+}
+
 // ---------- profile
 async function viewProfile(main, username = me.username, tab = 'posts') {
   const u = username === me.username ? me : await db.get('users', username);
@@ -1276,6 +1570,8 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
   const trophies = [...(u.trophies || [])].sort((a, b) => a.earnedAt - b.earnedAt);
   const [mine, goals] = await Promise.all([db.byIndex('posts', 'author', u.username), db.byIndex('goals', 'owner', u.username)]);
   const posts = mine.filter(p => p.kind !== 'moment').sort((a, b) => b.createdAt - a.createdAt);
+  // Moments saved to highlights stay on the profile after their 24 hours are up.
+  profileHighlights = { user: u, list: mine.filter(p => p.kind === 'moment' && p.highlight).sort((a, b) => a.createdAt - b.createdAt) };
   const allUsers = await db.all('users');
   const followers = allUsers.filter(x => (x.following || []).includes(u.username)).length;
   const followingCount = (u.following || []).length;
@@ -1332,9 +1628,22 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
           <button class="icon-btn" data-action="report" data-user="${esc(u.username)}" aria-label="Report or block @${esc(u.username)}" title="Report or block">${icon('more')}</button>`}
       </div>
     </section>
+    ${profileHighlights.list.length ? `
+      <section class="card highlights" aria-label="Highlights">
+        ${profileHighlights.list.map((h, i) => `
+          <button class="highlight" data-action="open-highlights" data-index="${i}" aria-label="Highlight ${i + 1}">
+            <span class="ring">${h.mediaType === 'video'
+              ? `<video src="${blobURL(h.id, h.media)}#t=0.1" muted playsinline preload="metadata"></video>`
+              : `<img src="${blobURL(h.id, h.media)}" alt="" loading="lazy">`}</span>
+            ${h.caption ? `<span class="mb-name">${esc(h.caption)}</span>` : ''}
+          </button>`).join('')}
+      </section>` : ''}
     <nav class="tabs">${tabLink('posts', 'Posts')}${tabLink('videos', 'Videos')}${own ? tabLink('saved', 'Saved') : ''}${tabLink('goals', 'Goals')}${tabLink('trophies', 'Trophies')}</nav>
     <section class="tab-body">${content}</section>`;
 }
+
+let profileHighlights = { user: null, list: [] };
+actions['open-highlights'] = el => openViewer([profileHighlights], 0, +el.dataset.index);
 
 actions['edit-profile'] = () => {
   if (!me) return;
@@ -1572,7 +1881,7 @@ actions['block-toggle'] = async el => {
 // ---------- notifications
 // Built from what is saved: licks and barks on your posts, new followers, and new posts from people you follow.
 async function notifications() {
-  const [posts, comments, users, reports] = await Promise.all([db.all('posts'), db.all('comments'), db.all('users'), db.reportsAboutMe()]);
+  const [posts, comments, users, reports, momentActivity] = await Promise.all([db.all('posts'), db.all('comments'), db.all('users'), db.reportsAboutMe(), db.momentActivityForMe()]);
   const mine = new Map(posts.filter(p => p.author === me.username).map(p => [p.id, p]));
   const items = [];
   for (const p of mine.values()) {
@@ -1590,6 +1899,11 @@ async function notifications() {
     if (!(me.following || []).includes(p.author)) continue;
     if (p.kind === 'moment' && p.expiresAt <= Date.now()) continue;
     if (p.createdAt > (since[p.author] || 0)) items.push({ type: 'post', who: p.author, post: p, at: p.createdAt });
+  }
+  // Reactions, poll votes and answers on your moments.
+  for (const r of momentActivity) {
+    const p = mine.get(r.postId);
+    if (p) items.push({ type: `moment-${r.kind}`, who: r.user, post: p, value: r.value, at: r.at });
   }
   // Reports about you or your posts. Who sent them stays private.
   // Only the reason ("Spam"), never the reporter's own description after it.
@@ -1618,10 +1932,13 @@ async function viewNotifications(main) {
     if (n.type === 'lick') return `${name} licked your post`;
     if (n.type === 'bark') return `${name} ${soundFor(n.user.petType).past}: “${esc(n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text)}”`;
     if (n.type === 'follow') return `${name} started following you`;
+    if (n.type === 'moment-reaction') return `${name} reacted to your moment: ${esc(REACTIONS.find(([k]) => k === n.value)?.[1] || 'Lick')}`;
+    if (n.type === 'moment-vote') return `${name} voted “${esc(n.post.poll?.options[n.value] ?? '')}” on your poll`;
+    if (n.type === 'moment-answer') return `${name} answered your question: “${esc(n.value.length > 80 ? n.value.slice(0, 80) + '…' : n.value)}”`;
     if (n.type === 'report') return `Someone reported ${n.post ? 'your post' : 'your account'} for <strong>${esc(n.reason)}</strong>. The people who run PetPost will take a look.`;
     return `${name} ${n.post.kind === 'moment' ? 'shared a moment' : n.post.mediaType === 'video' ? 'posted a new video' : 'posted a new photo'}`;
   };
-  const iconFor = { lick: 'lick', bark: 'bark', follow: 'userPlus', post: 'photo', report: 'flag' };
+  const iconFor = { lick: 'lick', bark: 'bark', follow: 'userPlus', post: 'photo', report: 'flag', 'moment-reaction': 'sparkle', 'moment-vote': 'check', 'moment-answer': 'bark' };
   main.innerHTML = `
     <section class="card">
       <h1>Notifications</h1>

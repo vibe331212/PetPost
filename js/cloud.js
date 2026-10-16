@@ -12,7 +12,7 @@ const BUCKET = 'media';
 const email = username => `${username}@users.petpost.app`;
 const PUBLIC_FIELDS = ['displayName', 'petName', 'petType', 'bio', 'avatarPath', 'avatarAt', 'trophies', 'practiceDays', 'streakTrophies', 'breed', 'birthday', 'treat', 'toy'];
 const PRIVATE_FIELDS = ['saved', 'care', 'careLog', 'notifSeen', 'cameraAsked', 'theme', 'shortcuts'];
-const POST_FIELDS = ['kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt'];
+const POST_FIELDS = ['kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt', 'poll', 'ask', 'highlight'];
 
 const pick = (obj, keys) => Object.fromEntries(keys.filter(k => obj[k] !== undefined).map(k => [k, obj[k]]));
 const iso = ts => new Date(ts || Date.now()).toISOString();
@@ -267,6 +267,33 @@ export async function setBlocked(username, on) {
     check(await sb.from('blocks').delete().eq('blocker', myId).eq('blocked', id));
   }
   invalidate();
+}
+
+// ---------- moments: poll votes, answers to questions and quick reactions
+const toResponse = r => ({ postId: r.post_id, user: nameOf(r.user_id), kind: r.kind, value: r.value, at: ms(r.created_at) });
+// Your own responses to a moment, or, on your own moment, everyone's.
+export async function momentResponses(postId) {
+  const rows = check(await sb.from('moment_responses').select('post_id,user_id,kind,value,created_at').eq('post_id', postId));
+  await loadProfiles();
+  return rows.map(toResponse).filter(r => r.user);
+}
+// Vote, answer or react (a value of null takes it back).
+export async function respondToMoment(postId, kind, value) {
+  if (value == null) check(await sb.from('moment_responses').delete().eq('post_id', postId).eq('user_id', myId).eq('kind', kind));
+  else check(await sb.from('moment_responses').upsert({ post_id: postId, user_id: myId, kind, value: String(value), created_at: iso() }, { onConflict: 'post_id,user_id,kind' }));
+}
+// Votes per poll choice, without who voted: { "0": 3, "1": 5 }.
+export async function pollResults(postId) {
+  const rows = check(await sb.rpc('moment_poll_results', { target: postId }));
+  return Object.fromEntries(rows.map(r => [r.choice, Number(r.votes)]));
+}
+// Other people's responses to your moments, for notifications.
+export async function momentActivityForMe() {
+  if (!myId) return [];
+  const { data, error } = await sb.from('moment_responses').select('post_id,user_id,kind,value,created_at').neq('user_id', myId).order('created_at', { ascending: false }).limit(200);
+  if (error) return []; // older database without moment responses yet
+  await loadProfiles();
+  return data.map(toResponse).filter(r => r.user);
 }
 
 // ---------- admins (people who run PetPost and look at reports)
