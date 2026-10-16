@@ -10,9 +10,9 @@ export const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 const BUCKET = 'media';
 const email = username => `${username}@users.petpost.app`;
-const PUBLIC_FIELDS = ['displayName', 'petName', 'petType', 'bio', 'avatarPath', 'avatarAt', 'trophies', 'practiceDays', 'streakTrophies', 'breed', 'birthday', 'treat', 'toy'];
+const PUBLIC_FIELDS = ['displayName', 'petName', 'petType', 'bio', 'avatarPath', 'avatarAt', 'trophies', 'practiceDays', 'streakTrophies', 'breed', 'birthday', 'treat', 'toy', 'pets', 'activePet'];
 const PRIVATE_FIELDS = ['saved', 'care', 'careLog', 'notifSeen', 'cameraAsked', 'theme', 'shortcuts', 'seenMoments'];
-const POST_FIELDS = ['kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt', 'poll', 'ask', 'highlight', 'quiz', 'rate', 'iPos'];
+const POST_FIELDS = ['petId', 'petName', 'kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt', 'poll', 'ask', 'highlight', 'quiz', 'rate', 'iPos'];
 
 const pick = (obj, keys) => Object.fromEntries(keys.filter(k => obj[k] !== undefined).map(k => [k, obj[k]]));
 const iso = ts => new Date(ts || Date.now()).toISOString();

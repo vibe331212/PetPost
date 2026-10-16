@@ -901,3 +901,14 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 /* Admins: the Reports button sits next to the PetPost logo */
 .top-left { gap: 8px; flex-wrap: nowrap; }
 @media (max-width: 400px) { .topbar.admin .top-actions .mode-chip:not(.icon-chip) span { display: none; } .topbar.admin .top-actions .mode-chip:not(.icon-chip) { padding: 8px 10px; } }
+
+/* More than one pet: buttons under the profile name */
+.pet-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pet-chip { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px 6px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.pet-chip .ic { width: 15px; height: 15px; color: var(--muted); }
+.pet-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pet-chip.on .ic { color: #fff; }
+.pet-chip.add { background: none; border-style: dashed; color: var(--accent); }
+.pet-chip.add .ic { color: var(--accent); }
+.posting-as { display: flex; align-items: center; gap: 5px; margin: -4px 0 12px; }
+.posting-as .ic { width: 15px; height: 15px; }

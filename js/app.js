@@ -94,7 +94,31 @@ async function usersMap() {
   (await db.all('users')).forEach(u => map.set(u.username, u));
   return map;
 }
-const saveMe = () => db.put('users', me);
+// ---------- more than one pet
+// Each pet has its own name, type, pet card details, streak and goals. The pet you picked is copied into
+// the account's top-level fields (petName, petType...), so the rest of the app just uses those.
+const PET_FIELDS = ['petName', 'petType', 'breed', 'birthday', 'treat', 'toy', 'practiceDays', 'streakTrophies'];
+const petFields = u => Object.fromEntries(PET_FIELDS.map(k => [k, u?.[k]]));
+const petsOf = u => (Array.isArray(u?.pets) && u.pets.length ? u.pets : [{ id: 'pet-1', ...petFields(u) }]);
+const activePetId = u => (petsOf(u).some(p => p.id === u?.activePet) ? u.activePet : petsOf(u)[0].id);
+// Goals made before there were several pets belong to the first pet.
+const goalForPet = (g, u, petId = activePetId(u)) => (g.petId || petsOf(u)[0].id) === petId;
+function syncActivePet(u) {
+  const id = activePetId(u);
+  u.pets = petsOf(u).map(p => (p.id === id ? { ...p, ...petFields(u) } : p));
+  u.activePet = id;
+}
+function usePet(u, id) {
+  syncActivePet(u);
+  const pet = u.pets.find(p => p.id === id);
+  if (!pet) return;
+  for (const k of PET_FIELDS) u[k] = pet[k] ?? (k === 'practiceDays' || k === 'streakTrophies' ? [] : '');
+  u.activePet = id;
+}
+// The same person, showing one of their other pets (for looking at someone else's profile).
+const withPet = (u, id) => ({ ...u, ...petFields(petsOf(u).find(p => p.id === id) || u) });
+const petTag = () => ({ petId: activePetId(me), petName: me.petName || '' });
+const saveMe = () => { syncActivePet(me); return db.put('users', me); };
 
 function go(hash) {
   if (location.hash === hash) route();
@@ -509,7 +533,7 @@ function postCard(p, author, from = 'feed') {
         <a href="#/profile/${esc(author.username)}">${avatar(author)}</a>
         <div class="who">
           <a href="#/profile/${esc(author.username)}" class="name">${esc(author.displayName)}</a>
-          <span class="sub">@${esc(author.username)}${author.petName ? ` · ${esc(author.petName)}` : ''} · ${ago(p.createdAt)}</span>
+          <span class="sub">@${esc(author.username)}${p.petName || author.petName ? ` · ${esc(p.petName || author.petName)}` : ''} · ${ago(p.createdAt)}</span>
         </div>
         ${own ? `<button class="icon-btn" data-action="delete-post" data-id="${p.id}" aria-label="Delete post">${icon('trash')}</button>`
               : `<button class="icon-btn" data-action="report" data-post="${p.id}" data-user="${esc(p.author)}" aria-label="Report post" title="Report">${icon('flag')}</button>`}
@@ -1426,13 +1450,14 @@ const KIND_HINTS = {
 };
 
 async function viewCreate(main, arg) {
-  const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.completedAt);
+  const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.completedAt && goalForPet(g, me));
   const goalId = arg?.startsWith('goal-') ? arg.slice(5) : '';
   const goal = goals.find(g => g.id === goalId);
   draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '', iPos: { x: 0.5, y: 0.72, s: 1, r: 0 } };
   main.innerHTML = `
     <section class="card create">
       <h1>New post</h1>
+      ${petsOf(me).length > 1 ? `<p class="posting-as muted small">${icon('paw')}Posting as <strong>${esc(me.petName || 'your pet')}</strong> · <a href="#/profile/${esc(me.username)}">Switch pet</a></p>` : ''}
       <div class="seg kinds">
         ${['photo', 'video', 'moment'].map(k => `<button type="button" data-action="kind" data-kind="${k}">${icon(k)}${cap(k)}</button>`).join('')}
       </div>
@@ -1841,6 +1866,7 @@ forms.publish = async (form, fd) => {
   const post = {
     id: db.uid(),
     author: me.username,
+    ...petTag(),
     kind: isMoment ? 'moment' : draft.result.type === 'video' ? 'video' : 'photo',
     mediaType: draft.result.type,
     width: draft.result.width || null,
@@ -1885,7 +1911,7 @@ async function publishMoment(form, fd) {
     for (const [i, it] of items.entries()) {
       if (items.length > 1) toast(`Sharing ${i + 1} of ${items.length}...`);
       await db.put('posts', {
-        id: db.uid(), author: me.username, kind: 'moment', mediaType: it.result.type,
+        id: db.uid(), author: me.username, ...petTag(), kind: 'moment', mediaType: it.result.type,
         width: it.result.width || null, height: it.result.height || null, media: it.result.blob,
         caption: i === 0 ? String(fd.get('caption') || '').trim() : '',
         poll: i === 0 ? poll : null, ask: i === 0 ? ask : null,
@@ -1906,9 +1932,85 @@ async function publishMoment(form, fd) {
 }
 
 // ---------- profile
+const profilePet = {}; // which of someone else's pets you're looking at, by username
+
+// One button per pet under the profile name. On your profile, tapping one switches to that pet.
+function petChips(u, own, shown) {
+  const pets = petsOf(u);
+  if (pets.length < 2 && !own) return '';
+  return `
+    <div class="pet-chips" role="group" aria-label="${own ? 'Your pets' : 'Pets'}">
+      ${pets.length > 1 || own ? pets.map(p => `
+        <button class="pet-chip ${p.id === shown ? 'on' : ''}" data-action="${own ? 'switch-pet' : 'view-pet'}" data-user="${esc(u.username)}" data-pet="${esc(p.id)}" aria-pressed="${p.id === shown}">${icon('paw')}${esc(p.petName || 'Pet')}</button>`).join('') : ''}
+      ${own ? `<button class="pet-chip add" data-action="add-pet">${icon('plus')}Add pet</button>` : ''}
+    </div>`;
+}
+
+actions['view-pet'] = el => { profilePet[el.dataset.user] = el.dataset.pet; route(); };
+actions['switch-pet'] = async el => {
+  if (el.dataset.pet === activePetId(me)) return;
+  usePet(me, el.dataset.pet);
+  await saveMe();
+  applyTheme(me.theme);
+  toast(`Switched to ${me.petName || 'your pet'}`);
+  route();
+};
+
+actions['add-pet'] = () => {
+  const d = document.createElement('dialog');
+  d.className = 'modal';
+  d.innerHTML = `
+    <form data-form="add-pet" class="stack">
+      <header class="row"><h2>Add a pet</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
+      <p class="muted">Each pet gets its own goals, streak and pet card. Switch between them on your profile.</p>
+      <label class="field"><span>Pet's name</span><input name="petName" maxlength="40" required></label>
+      <label class="field"><span>Pet type</span><select name="petType">${PET_TYPES.map(t => `<option>${esc(t)}</option>`).join('')}</select><small class="sound-hint muted">${soundHint(PET_TYPES[0])}</small></label>
+      <label class="field"><span>Breed</span><input name="breed" maxlength="40" placeholder="Optional"></label>
+      <p class="form-error" role="alert"></p>
+      <div class="row"><span class="spacer"></span><button type="button" class="btn ghost" data-action="close-dialog">Cancel</button><button class="btn primary">Add pet</button></div>
+    </form>`;
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+};
+forms['add-pet'] = (form, fd) => withBusy(form, async () => {
+  if (petsOf(me).length >= 12) throw new Error('You can have up to 12 pets.');
+  const name = String(fd.get('petName') || '').trim();
+  if (!name) throw new Error("Type your pet's name.");
+  syncActivePet(me);
+  const id = `pet-${db.uid().slice(0, 8)}`;
+  me.pets.push({ id, petName: name, petType: String(fd.get('petType') || '').trim(), breed: String(fd.get('breed') || '').trim(), practiceDays: [], streakTrophies: [] });
+  usePet(me, id);
+  await saveMe();
+  form.closest('dialog').close();
+  toast(`Added ${name}. You're now posting as ${name}.`);
+  route();
+});
+
+actions['remove-pet'] = async el => {
+  const name = me.petName || 'this pet';
+  if (!confirm(`Remove ${name}? ${name}'s goals and streak will be deleted. Posts about ${name} stay.`)) return;
+  el.disabled = true;
+  const gone = activePetId(me);
+  const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => goalForPet(g, me, gone));
+  for (const g of goals) await db.del('goals', g.id);
+  syncActivePet(me);
+  // Goals with no pet belonged to the first pet; give them to it for good before it moves.
+  const first = me.pets[0].id;
+  if (first !== gone) for (const g of (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.petId)) await db.put('goals', { ...g, petId: first });
+  me.pets = me.pets.filter(p => p.id !== gone);
+  me.activePet = me.pets[0].id;
+  for (const k of PET_FIELDS) me[k] = me.pets[0][k] ?? (k === 'practiceDays' || k === 'streakTrophies' ? [] : '');
+  await saveMe();
+  el.closest('dialog')?.close();
+  toast(`Removed ${name}`);
+  route();
+};
 async function viewProfile(main, username = me.username, tab = 'posts') {
-  const u = username === me.username ? me : await db.get('users', username);
+  let u = username === me.username ? me : await db.get('users', username);
   if (!u) { main.innerHTML = `<div class="card empty"><p>That profile does not exist.</p></div>`; return; }
+  const shownPet = u === me ? activePetId(me) : (petsOf(u).some(p => p.id === profilePet[u.username]) ? profilePet[u.username] : activePetId(u));
+  if (u !== me) u = withPet(u, shownPet);
   const own = u.username === me.username;
   if (tab === 'saved' && !own) tab = 'posts';
   if (own) {
@@ -1919,7 +2021,8 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
     if (me.trophies.length !== before) await saveMe();
   }
   const trophies = [...(u.trophies || [])].sort((a, b) => a.earnedAt - b.earnedAt);
-  const [mine, goals] = await Promise.all([db.byIndex('posts', 'author', u.username), db.byIndex('goals', 'owner', u.username)]);
+  const [mine, allGoals] = await Promise.all([db.byIndex('posts', 'author', u.username), db.byIndex('goals', 'owner', u.username)]);
+  const goals = allGoals.filter(g => goalForPet(g, u, shownPet));
   const posts = mine.filter(p => p.kind !== 'moment').sort((a, b) => b.createdAt - a.createdAt);
   // Moments saved to highlights stay on the profile after their 24 hours are up.
   profileHighlights = { user: u, list: mine.filter(p => p.kind === 'moment' && p.highlight).sort((a, b) => a.createdAt - b.createdAt) };
@@ -1961,6 +2064,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
         <h1>${esc(u.displayName)}</h1>
         <p class="muted">@${esc(u.username)}</p>
         ${u.petName ? `<p class="pet">${icon('paw')}${esc(u.petName)}${u.petType ? ` <span class="muted">· ${esc(u.petType)}</span>` : ''}</p>` : ''}
+        ${petChips(u, own, shownPet)}
         ${u.bio ? `<p class="bio">${esc(u.bio)}</p>` : ''}
       </div>
       <div class="stats four">
@@ -2011,6 +2115,7 @@ actions['edit-profile'] = () => {
       </div>
       <label class="field"><span>Pet type</span><select name="petType">${[...new Set([...PET_TYPES, me.petType].filter(Boolean))].map(t => `<option ${t === me.petType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><small class="sound-hint muted">${soundHint(me.petType)}</small></label>
       <label class="field"><span>Bio</span><textarea name="bio" maxlength="200" rows="3">${esc(me.bio)}</textarea></label>
+      ${petsOf(me).length > 1 ? `<p class="muted small">You're editing ${esc(me.petName || 'this pet')}. Switch pets on your profile to edit another one.</p>` : ''}
       <h3 class="form-section">Pet card</h3>
       <div class="two">
         <label class="field"><span>Breed</span><input name="breed" maxlength="40" value="${esc(me.breed || '')}" placeholder="Golden retriever"></label>
@@ -2020,6 +2125,7 @@ actions['edit-profile'] = () => {
         <label class="field"><span>Favorite treat</span><input name="treat" maxlength="40" value="${esc(me.treat || '')}" placeholder="Peanut butter"></label>
         <label class="field"><span>Favorite toy</span><input name="toy" maxlength="40" value="${esc(me.toy || '')}" placeholder="Squeaky ball"></label>
       </div>
+      ${petsOf(me).length > 1 ? `<button type="button" class="btn ghost danger" data-action="remove-pet">${icon('trash')}Remove ${esc(me.petName || 'this pet')}</button>` : ''}
       <details>
         <summary>Change password</summary>
         <div class="stack pad-top">
@@ -2472,7 +2578,7 @@ actions['remove-reported-post'] = async el => {
 
 // ---------- pet card
 async function petCard(u) {
-  const goals = await db.byIndex('goals', 'owner', u.username);
+  const goals = (await db.byIndex('goals', 'owner', u.username)).filter(g => goalForPet(g, u));
   const tricks = goals.filter(g => g.completedAt).sort((a, b) => a.completedAt - b.completedAt).map(g => trickName(g.title)).filter(Boolean);
   const best = streakStats(u.practiceDays).best;
   const facts = [
@@ -2670,7 +2776,7 @@ function goalCard(g, own) {
 }
 
 async function viewGoals(main) {
-  const goals = (await db.byIndex('goals', 'owner', me.username)).sort((a, b) => b.createdAt - a.createdAt);
+  const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => goalForPet(g, me)).sort((a, b) => b.createdAt - a.createdAt);
   const active = goals.filter(g => !g.completedAt), done = goals.filter(g => g.completedAt);
   const pet = me.petName || 'my pet';
   main.innerHTML = `
@@ -2715,7 +2821,7 @@ forms.goal = async (form, fd) => {
   formError(form, '');
   const title = /^teach\b/i.test(what) ? what : `Teach ${me.petName || 'my pet'} to ${what}`;
   const steps = String(fd.get('steps') || '').split('\n').map(s => s.trim()).filter(Boolean).map(text => ({ text, done: false }));
-  await db.put('goals', { id: db.uid(), owner: me.username, title, steps, target: fd.get('target') || null, createdAt: Date.now(), completedAt: null });
+  await db.put('goals', { id: db.uid(), owner: me.username, petId: activePetId(me), title, steps, target: fd.get('target') || null, createdAt: Date.now(), completedAt: null });
   toast('Goal added. Add another any time.');
   await route();
   document.querySelector('.goal')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2896,7 +3002,7 @@ actions['goal-practice'] = async el => {
     // Undo: only drop today from the streak if no other goal was practised today.
     g.practice = g.practice.filter(d => d !== today);
     await db.put('goals', g);
-    const others = (await db.byIndex('goals', 'owner', me.username)).some(x => x.id !== g.id && x.practice?.includes(today));
+    const others = (await db.byIndex('goals', 'owner', me.username)).some(x => x.id !== g.id && goalForPet(x, me) && x.practice?.includes(today));
     if (!others) { me.practiceDays = (me.practiceDays || []).filter(d => d !== today); await saveMe(); }
     await refreshGoal(g.id);
     refreshStreakCard();
@@ -2927,7 +3033,7 @@ actions['goal-share'] = async el => {
       ? `Goal complete: ${g.title}!`
       : `Working on: ${g.title}${total ? ` \u00b7 ${done} of ${total} steps` : ''}`;
     await db.put('posts', {
-      id: db.uid(), author: me.username, kind: 'photo', mediaType: 'image', media: blob, caption,
+      id: db.uid(), author: me.username, ...petTag(), kind: 'photo', mediaType: 'image', media: blob, caption,
       licks: [], barkCount: 0, report: {}, goalId: g.id, goalTitle: g.title, createdAt: Date.now(), expiresAt: null,
     });
     toast('Progress posted to your profile');
