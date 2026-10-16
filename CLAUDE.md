@@ -11,6 +11,8 @@ Two people code this from two computers, so **pull before starting and push when
 - Other files: `media.js` (photo resize, video), `camera.js`, `stickers.js`, `petcard.js` (pet card and goal progress images), `celebrate.js` (confetti and trophies), `themes.js` (the 15 modes), `icons.js`, `sounds.js`.
 - `sw.js`: service worker so it works as a home-screen app. **Bump `VERSION` every time app files change**, or phones keep the old version. If you add a new JS file, also add it to `SHELL`.
 - `supabase/migrations/`: database tables and security rules (RLS: people can only change their own things). Database changes need the password in `supabase/db-password.local.txt`, which is only on the owner's computer and must never be committed.
+  - **A new migration file does nothing until it is pushed to the live database** (`supabase db push --linked`), and app code that needs it breaks until then. If you can't push it yourself, tell the person you're working with clearly that "the database needs updating" before pushing the app code.
+  - Make changes through migration files, not by hand in the Supabase dashboard, so the history stays right.
 - `ios/`: an iPhone app (Xcode, WKWebView) that bundles the web files and adds a native bridge for reminders, the share sheet and haptics. It needs a Mac with Xcode. Version numbers are in the project settings.
 
 ## App words and rules
