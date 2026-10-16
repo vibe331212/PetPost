@@ -1462,7 +1462,7 @@ async function viewCreate(main, arg) {
             </div>
           </div>
           <div class="extra-choices stack" hidden>
-            <label class="field"><span>Question</span><input name="iQuestion" maxlength="80" placeholder="Who is the goodest?"></label>
+            <label class="field"><span>Question</span><input name="iQuestion" maxlength="80"></label>
             ${[1, 2, 3, 4].map(n => `
               <div class="choice-row">
                 <label class="field"><span>Choice ${n}${n > 2 ? ' (optional)' : ''}</span><input name="iOpt${n}" maxlength="30" ${n === 1 ? 'value="Yes"' : n === 2 ? 'value="No"' : ''}></label>
@@ -1470,7 +1470,7 @@ async function viewCreate(main, arg) {
               </div>`).join('')}
           </div>
           <div class="extra-ask" hidden>
-            <label class="field"><span>Your question</span><input name="askPrompt" maxlength="80" value="Ask me anything"></label>
+            <label class="field"><span>Your question</span><input name="askPrompt" maxlength="80"></label>
           </div>
           <div class="extra-rate" hidden>
             <label class="field"><span>Rating question</span><input name="rateQuestion" maxlength="80" value="How cute is this?"></label>
@@ -1519,6 +1519,10 @@ function updateKindUI() {
   const choices = root.querySelector('.extra-choices');
   choices.hidden = !['poll', 'quiz'].includes(draft.extra);
   choices.classList.toggle('quiz', draft.extra === 'quiz');
+  const pet = me.petName || 'my pet';
+  choices.querySelector('[name="iQuestion"]').placeholder = draft.extra === 'quiz' ? `How old is ${pet}?` : `Which toy should ${pet} play with?`;
+  // Left blank, the question box uses this example as its question.
+  root.querySelector('[name="askPrompt"]').placeholder = askExample();
   root.querySelector('.extra-ask').hidden = draft.extra !== 'ask';
   root.querySelector('.extra-rate').hidden = draft.extra !== 'rate';
   renderStickerPreview();
@@ -1526,6 +1530,7 @@ function updateKindUI() {
 
 // While making a post, the poll, quiz, question or rating shows on the picture as it will look.
 // Drag it to move it; drag its corner (or use the slider) to resize it.
+const askExample = () => `Ask me anything about ${me.petName || 'my pet'}`;
 function previewInteractive(fd) {
   const t = name => String(fd.get(name) || '').trim();
   if (draft.extra === 'poll' || draft.extra === 'quiz') {
@@ -1533,7 +1538,7 @@ function previewInteractive(fd) {
     const it = { question: t('iQuestion') || 'Your question', options: filled.length ? filled : ['Yes', 'No'] };
     return draft.extra === 'poll' ? { poll: it } : { quiz: { ...it, answer: 0 } };
   }
-  if (draft.extra === 'ask') return { ask: { prompt: t('askPrompt') || 'Ask me anything' } };
+  if (draft.extra === 'ask') return { ask: { prompt: t('askPrompt') || askExample() } };
   if (draft.extra === 'rate') return { rate: { question: t('rateQuestion') || 'How cute is this?' } };
   return null;
 }
@@ -1625,7 +1630,7 @@ function readInteractive(form, fd) {
     if (answer < 0) return fail('Mark one of the choices you filled in as the right answer.');
     return { quiz: { question, options, answer } };
   }
-  if (extra === 'ask') return { ask: { prompt: t('askPrompt') || 'Ask me anything' } };
+  if (extra === 'ask') return { ask: { prompt: t('askPrompt') || askExample() } };
   if (extra === 'rate') return { rate: { question: t('rateQuestion') || 'How cute is this?' } };
   return {};
 }
