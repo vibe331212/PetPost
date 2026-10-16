@@ -1330,6 +1330,8 @@ actions['follow-list'] = async el => {
   d.showModal();
 };
 
+const REPORT_REASONS = ['Spam', 'Mean or bullying', 'Not appropriate', 'Hurting an animal', 'Not an animal', 'Something else'];
+
 // ---------- report and block (people who share posts with each other need a way to stay safe)
 let blockedSet = new Set();
 async function refreshBlocked() {
@@ -1345,7 +1347,11 @@ actions.report = el => {
     <header class="row"><h2>${post ? 'Report this post' : `@${esc(user)}`}</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
     <p class="muted">${post ? 'Why are you reporting it? The people who run PetPost will take a look.' : 'Report this account, or block it so you no longer see each other’s posts.'}</p>
     <div class="stack pad-top report-reasons">
-      ${['Spam', 'Mean or bullying', 'Not appropriate', 'Hurting an animal', 'Something else'].map(r => `<button type="button" class="btn ghost block" data-action="report-send" data-reason="${r}">${icon('flag')}${r}</button>`).join('')}
+      ${REPORT_REASONS.map(r => `<button type="button" class="btn ghost block" data-action="report-pick" data-reason="${r}" aria-pressed="false">${icon('flag')}${r}</button>`).join('')}
+      <form data-form="report" class="stack report-details" hidden>
+        <label class="field"><span class="report-details-label">Add a description (optional)</span><textarea name="details" rows="3" maxlength="300" placeholder="Anything that helps explain the problem"></textarea></label>
+        <button class="btn primary block">Send report</button>
+      </form>
       <button type="button" class="btn ghost block danger" data-action="block-toggle" data-user="${esc(user)}">${icon('block')}${isBlocked ? `Unblock @${esc(user)}` : `Block @${esc(user)}`}</button>
     </div>`;
   d.dataset.post = post || '';
@@ -1355,13 +1361,37 @@ actions.report = el => {
   d.showModal();
 };
 
-actions['report-send'] = async el => {
-  const d = el.closest('dialog');
+async function sendReport(d, reason) {
   try {
-    await db.report({ postId: d.dataset.post || null, username: d.dataset.user, reason: el.dataset.reason });
+    await db.report({ postId: d.dataset.post || null, username: d.dataset.user, reason });
     d.close();
     toast('Thanks. Your report was sent.');
   } catch (err) { toast(`Could not send the report: ${err.message}`); }
+}
+
+// Pick a reason, add a description if you like (Something else needs one), then send.
+actions['report-pick'] = el => {
+  const d = el.closest('dialog');
+  d.querySelectorAll('[data-action="report-pick"]').forEach(b => {
+    b.classList.toggle('on', b === el);
+    b.setAttribute('aria-pressed', b === el);
+  });
+  const form = d.querySelector('.report-details');
+  const other = el.dataset.reason === 'Something else';
+  form.dataset.reason = el.dataset.reason;
+  form.hidden = false;
+  form.querySelector('.report-details-label').textContent = other ? "What's wrong?" : 'Add a description (optional)';
+  const box = form.querySelector('textarea');
+  box.required = other;
+  box.placeholder = other ? 'Tell the people who run PetPost what the problem is' : 'Anything that helps explain the problem';
+  if (other) box.focus();
+};
+
+forms.report = (form, fd) => {
+  const details = String(fd.get('details') || '').trim();
+  if (!form.dataset.reason) return;
+  if (form.dataset.reason === 'Something else' && !details) { form.querySelector('textarea').focus(); return; }
+  sendReport(form.closest('dialog'), details ? `${form.dataset.reason}: ${details}` : form.dataset.reason);
 };
 
 actions['block-toggle'] = async el => {
@@ -1486,7 +1516,12 @@ async function viewReports(main) {
             <p class="muted small">${g.post.kind === 'moment' ? 'Moment' : g.post.mediaType === 'video' ? 'Video' : 'Photo'} posted ${ago(g.post.createdAt)}</p>
           </div>` : ''}
         <ul class="report-list">
-          ${g.reports.map(r => `<li><strong>${esc(r.reason)}</strong><span class="muted small">by @${esc(r.reporter || 'deleted account')} · ${ago(r.createdAt)}</span></li>`).join('')}
+          ${g.reports.map(r => {
+            // A description, if the reporter wrote one, comes after the reason and a colon.
+            const known = REPORT_REASONS.find(x => r.reason.startsWith(`${x}: `));
+            const [reason, ...rest] = known ? [known, r.reason.slice(known.length + 2)] : [r.reason];
+            return `<li><strong>${esc(reason)}</strong>${rest.length ? `<span class="report-words">“${esc(rest[0])}”</span>` : ''}<span class="muted small">by @${esc(r.reporter || 'deleted account')} · ${ago(r.createdAt)}</span></li>`;
+          }).join('')}
         </ul>
         <div class="row wrap">
           <button class="btn ghost sm" data-action="dismiss-reports" data-group="${i}">${icon('check')}Dismiss</button>

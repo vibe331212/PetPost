@@ -691,3 +691,6 @@ body::before {
 .vid-bar-fill { position: relative; height: 3px; width: 0; background: #fff; transition: height .15s; }
 .vid-bar.dragging::before, .vid-bar.dragging .vid-bar-fill, .vid-bar:hover::before, .vid-bar:hover .vid-bar-fill { height: 6px; }
 .vid-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.report-words { white-space: pre-wrap; overflow-wrap: anywhere; }
+.report-details[hidden] { display: none; }
+.report-reasons .btn.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
