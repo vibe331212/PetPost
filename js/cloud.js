@@ -244,6 +244,13 @@ export async function del(store, key) {
 export async function report({ postId = null, username = null, reason }) {
   check(await sb.from('reports').insert({ reporter: myId, post_id: postId, user_id: username ? idOf(username) : null, reason }));
 }
+// Reports about your account or posts. Never says who sent them.
+export async function reportsAboutMe() {
+  if (!myId) return [];
+  const { data, error } = await sb.rpc('reports_about_me');
+  if (error) return []; // older database without this yet
+  return data.map(r => ({ id: r.id, reason: r.reason, createdAt: ms(r.created_at), postId: r.post_id }));
+}
 export async function blocked() {
   if (!myId) return [];
   await loadProfiles();

@@ -1377,7 +1377,7 @@ actions['block-toggle'] = async el => {
 // ---------- notifications
 // Built from what is saved: licks and barks on your posts, new followers, and new posts from people you follow.
 async function notifications() {
-  const [posts, comments, users] = await Promise.all([db.all('posts'), db.all('comments'), db.all('users')]);
+  const [posts, comments, users, reports] = await Promise.all([db.all('posts'), db.all('comments'), db.all('users'), db.reportsAboutMe()]);
   const mine = new Map(posts.filter(p => p.author === me.username).map(p => [p.id, p]));
   const items = [];
   for (const p of mine.values()) {
@@ -1396,8 +1396,11 @@ async function notifications() {
     if (p.kind === 'moment' && p.expiresAt <= Date.now()) continue;
     if (p.createdAt > (since[p.author] || 0)) items.push({ type: 'post', who: p.author, post: p, at: p.createdAt });
   }
+  // Reports about you or your posts. Who sent them stays private.
+  for (const r of reports) items.push({ type: 'report', who: null, post: r.postId ? mine.get(r.postId) : null, reason: r.reason, at: r.createdAt });
   const map = new Map(users.map(u => [u.username, u]));
-  return items.filter(n => n.at).sort((a, b) => b.at - a.at).slice(0, 80).map(n => ({ ...n, user: map.get(n.who) || { username: n.who, displayName: n.who } }));
+  const petpost = { username: 'petpost', displayName: 'PetPost' };
+  return items.filter(n => n.at).sort((a, b) => b.at - a.at).slice(0, 80).map(n => ({ ...n, user: n.type === 'report' ? petpost : map.get(n.who) || { username: n.who, displayName: n.who } }));
 }
 
 async function updateBell() {
@@ -1419,17 +1422,18 @@ async function viewNotifications(main) {
     if (n.type === 'lick') return `${name} licked your post`;
     if (n.type === 'bark') return `${name} ${soundFor(n.user.petType).past}: “${esc(n.text.length > 80 ? n.text.slice(0, 80) + '…' : n.text)}”`;
     if (n.type === 'follow') return `${name} started following you`;
+    if (n.type === 'report') return `Someone reported ${n.post ? 'your post' : 'your account'} for <strong>${esc(n.reason)}</strong>. The people who run PetPost will take a look.`;
     return `${name} ${n.post.kind === 'moment' ? 'shared a moment' : n.post.mediaType === 'video' ? 'posted a new video' : 'posted a new photo'}`;
   };
-  const iconFor = { lick: 'lick', bark: 'bark', follow: 'userPlus', post: 'photo' };
+  const iconFor = { lick: 'lick', bark: 'bark', follow: 'userPlus', post: 'photo', report: 'flag' };
   main.innerHTML = `
     <section class="card">
       <h1>Notifications</h1>
-      <p class="muted">Licks and ${esc(soundFor(me.petType).words.toLowerCase())} on your posts, new followers, and new posts from people you follow.</p>
+      <p class="muted">Licks and ${esc(soundFor(me.petType).words.toLowerCase())} on your posts, new followers, new posts from people you follow, and reports about you.</p>
     </section>
     <section class="card notif-card">
       ${list.length ? `<ul class="notifs">${list.map(n => {
-        const href = n.type === 'follow' ? `#/profile/${esc(n.who)}` : n.post.kind === 'moment' ? '#/feed' : `#/post/${n.post.id}`;
+        const href = n.type === 'report' && !n.post ? `#/profile/${esc(me.username)}` : n.type === 'follow' ? `#/profile/${esc(n.who)}` : n.post.kind === 'moment' ? '#/feed' : `#/post/${n.post.id}`;
         const followBack = n.type === 'follow' && !(me.following || []).includes(n.who);
         return `
           <li class="notif ${n.at > seen ? 'new' : ''}">
