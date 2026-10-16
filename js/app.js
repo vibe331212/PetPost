@@ -610,9 +610,17 @@ async function viewFeed(main) {
     .map(([u, list]) => ({ user: users.get(u) || { username: u, displayName: u }, list }))
     .sort((a, b) => (b.user.username === me.username) - (a.user.username === me.username) || b.list.at(-1).createdAt - a.list.at(-1).createdAt);
 
+  // Profiles you dragged up here, for getting to them fast.
+  const shortcuts = (me.shortcuts || []).map(n => users.get(n)).filter(u => u && !blockedSet.has(u.username));
+
   main.innerHTML = `
     <section class="card moments" aria-label="Moments">
       <a class="moment-bubble" href="#/create/moment"><span class="ring add">${icon('plus')}</span><span class="mb-name">Add moment</span></a>
+      ${shortcuts.map(u => `
+        <a class="moment-bubble shortcut" href="#/profile/${esc(u.username)}" data-shortcut="${esc(u.username)}">
+          <span class="ring pin">${avatar(u, 'lg')}</span>
+          <span class="mb-name">${esc(u.username === me.username ? 'You' : u.displayName)}</span>
+        </a>`).join('')}
       ${momentGroups.map((g, i) => `
         <button class="moment-bubble" data-action="open-moments" data-index="${i}">
           <span class="ring">${avatar(g.user, 'lg')}</span>
@@ -637,6 +645,104 @@ async function viewFeed(main) {
         <a class="btn primary" href="#/create">${icon('plus')}Create your first post</a>
       </div>`}`;
 }
+
+// ---------- profile shortcuts
+// Press and hold someone's picture on a post, drag it up to the top row, and let go: a circle appears
+// there that takes you straight to their profile. Press and hold a circle to remove it.
+const HOLD_MS = 280;
+let press = null;
+let dragged = false; // swallow the tap that ends a drag
+const swallowTap = () => { dragged = true; setTimeout(() => { dragged = false; }, 450); };
+
+function startPress(e) {
+  if (e.button > 0 || !document.querySelector('#view .moments')) return;
+  const shortcut = e.target.closest('.moments .shortcut');
+  const av = !shortcut && e.target.closest('.post-head .avatar');
+  if (!shortcut && !av) return;
+  const user = shortcut ? shortcut.dataset.shortcut : decodeURIComponent(av.closest('a[href^="#/profile/"]').getAttribute('href').split('/').pop());
+  press = { x: e.clientX, y: e.clientY, user, shortcut, av, timer: setTimeout(() => held(), HOLD_MS) };
+}
+
+function held() {
+  if (!press) return;
+  Native.send({ type: 'haptic', style: 'light' });
+  if (press.shortcut) {
+    const user = press.user; press = null; swallowTap();
+    const remove = confirm(`Remove @${user} from your shortcuts?`);
+    dragged = false; // the question box already took the touch, so the next tap is a real one
+    if (remove) {
+      me.shortcuts = (me.shortcuts || []).filter(n => n !== user);
+      saveMe(); viewFeed(document.getElementById('view'));
+    }
+    return;
+  }
+  const r = press.av.getBoundingClientRect();
+  const ghost = press.av.cloneNode(true);
+  ghost.className = `${press.av.className} drag-ghost`;
+  ghost.style.width = ghost.style.height = `${r.width * 1.3}px`;
+  document.body.append(ghost);
+  press.ghost = ghost;
+  document.body.classList.add('dragging-profile');
+  moveGhost(press.x, press.y);
+}
+
+function moveGhost(x, y) {
+  press.ghost.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+  const row = document.querySelector('#view .moments');
+  const r = row?.getBoundingClientRect();
+  press.over = !!r && y < r.bottom + 30 && y > r.top - 30;
+  row?.classList.toggle('drop-here', press.over);
+  // Near the top of the screen, scroll up so the row comes into view.
+  const top = document.querySelector('.topbar')?.getBoundingClientRect().bottom || 0;
+  if (y < top + 70 && window.scrollY > 0) window.scrollBy(0, -14);
+}
+
+function movePress(e) {
+  if (!press) return;
+  if (!press.ghost) {
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) endPress(); // they're scrolling, not holding
+    return;
+  }
+  e.preventDefault();
+  moveGhost(e.clientX, e.clientY);
+}
+
+function endPress() {
+  if (!press) return;
+  clearTimeout(press.timer);
+  const { ghost, over, user } = press;
+  press = null;
+  if (!ghost) return;
+  swallowTap();
+  ghost.remove();
+  document.body.classList.remove('dragging-profile');
+  document.querySelector('#view .moments')?.classList.remove('drop-here');
+  if (!over) return;
+  const list = (me.shortcuts || []).filter(n => n !== user);
+  me.shortcuts = [user, ...list].slice(0, 20);
+  saveMe();
+  Native.send({ type: 'haptic', style: 'success' });
+  viewFeed(document.getElementById('view'));
+  toast(`Added @${user} to your shortcuts`);
+}
+
+document.addEventListener('pointerdown', startPress);
+document.addEventListener('pointermove', movePress, { passive: false });
+document.addEventListener('pointerup', endPress);
+document.addEventListener('pointercancel', () => { if (press && !press.ghost) endPress(); });
+// On phones, follow the finger with touch events too, and keep the page from scrolling under it.
+document.addEventListener('touchmove', e => {
+  if (!press?.ghost) return;
+  e.preventDefault();
+  moveGhost(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+document.addEventListener('touchend', endPress);
+document.addEventListener('click', e => {
+  if (!dragged) return;
+  dragged = false;
+  e.preventDefault(); e.stopPropagation();
+}, true);
+document.addEventListener('contextmenu', e => { if (e.target.closest('.post-head .avatar, .moments .shortcut')) e.preventDefault(); });
 
 function feedMode() {
   try { return localStorage.getItem('petpost.feed') === 'following' ? 'following' : 'all'; } catch { return 'all'; }

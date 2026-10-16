@@ -694,3 +694,17 @@ body::before {
 .report-words { white-space: pre-wrap; overflow-wrap: anywhere; }
 .report-details[hidden] { display: none; }
 .report-reasons .btn.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+/* Profile shortcuts in the top row (drag someone's picture up there) */
+.moments .ring.pin { background: var(--line); padding: 2px; }
+.moments.drop-here { outline: 2px dashed var(--accent); outline-offset: -6px; }
+.moments.drop-here .ring.add { background: var(--accent); color: #fff; border-color: transparent; transform: scale(1.08); transition: transform .15s; }
+.post-head .avatar, .moments .shortcut { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.post-head a:has(.avatar) img { -webkit-user-drag: none; }
+.drag-ghost { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,.3); border: 3px solid var(--surface-solid); }
+body.dragging-profile { -webkit-user-select: none; user-select: none; }
+/* The Care page's progress .ring rules must not leak into the top row's circles */
+.moments .ring:not(.add):not(.pin) { width: 66px; height: 66px; background: conic-gradient(from 200deg, var(--accent), var(--lick), #ffb547, var(--accent)); }
+.moments .ring .avatar { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, var(--lick))); }
+.moments .ring .avatar span { width: auto; height: auto; background: none; font-size: inherit; }
+.moments .ring.pin { width: 66px; height: 66px; }

@@ -11,7 +11,7 @@ export const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const BUCKET = 'media';
 const email = username => `${username}@users.petpost.app`;
 const PUBLIC_FIELDS = ['displayName', 'petName', 'petType', 'bio', 'avatarPath', 'avatarAt', 'trophies', 'practiceDays', 'streakTrophies', 'breed', 'birthday', 'treat', 'toy'];
-const PRIVATE_FIELDS = ['saved', 'care', 'careLog', 'notifSeen', 'cameraAsked', 'theme'];
+const PRIVATE_FIELDS = ['saved', 'care', 'careLog', 'notifSeen', 'cameraAsked', 'theme', 'shortcuts'];
 const POST_FIELDS = ['kind', 'mediaType', 'mediaPath', 'mediaMime', 'width', 'height', 'caption', 'report', 'goalId', 'goalTitle', 'expiresAt'];
 
 const pick = (obj, keys) => Object.fromEntries(keys.filter(k => obj[k] !== undefined).map(k => [k, obj[k]]));
