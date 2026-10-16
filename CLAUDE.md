@@ -25,4 +25,5 @@ Two people code this from two computers, so **pull before starting and push when
 ## Careful
 - The database is live, with real users. Don't delete accounts or posts unless the owner asks.
 - Test accounts must start with `pptest_` and be deleted afterwards.
+- `ai_sunny`, `ai_luna`, `ai_pepper` and `ai_clover` are AI sample accounts on purpose (profile `ai: true`, shown with an AI tag, photos from Unsplash). Nobody can sign in to them. Keep them labeled, never make them look like real people, and don't let them hold record trophies.
 - Keep explanations simple and friendly. The people working on this are new to coding.
