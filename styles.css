@@ -245,6 +245,8 @@ body[data-tone="dark"] .chips.privacy .chip { color: #5fe39a; }
 .back { display: inline-flex; align-items: center; gap: 4px; border: 0; background: var(--surface); border-radius: 999px; padding: 8px 14px 8px 8px; margin-bottom: 12px; cursor: pointer; font-weight: 600; backdrop-filter: blur(12px); border: 1px solid var(--line); }
 .back .ic { width: 18px; height: 18px; }
 
+.barks-head { margin: -6px -6px 12px 0; }
+.barks-head h2 { margin: 0; }
 .bark-list { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
 .bark { display: flex; gap: 10px; align-items: flex-start; }
 .bark-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }

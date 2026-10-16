@@ -510,7 +510,7 @@ function postCard(p, author, from = 'feed') {
       <div class="media">${mediaEl(p)}<span class="lick-burst">${icon('lick')}</span></div>
       <div class="actions">
         <button class="act lick ${licked ? 'on' : ''}" data-action="lick" data-id="${p.id}" aria-pressed="${licked}">${icon('lick')}<span class="count">${n}</span><span class="lbl">${plural(n, 'Lick')}</span></button>
-        <a class="act" href="#/post/${p.id}/${encodeURIComponent(from)}">${icon('bark')}<span class="count bark-count">${b}</span><span class="lbl">${countLabel(b, me.petType)}</span></a>
+        <a class="act" href="#/post/${p.id}/${encodeURIComponent(from)}" data-action="toggle-barks" data-id="${p.id}">${icon('bark')}<span class="count bark-count">${b}</span><span class="lbl">${countLabel(b, me.petType)}</span></a>
         <button class="act" data-action="share" data-id="${p.id}">${icon('share')}<span class="lbl">Share</span></button>
         <span class="spacer"></span>
         <button class="act" data-action="download" data-id="${p.id}" aria-label="Save to device" title="Save to device">${icon('download')}</button>
@@ -770,8 +770,12 @@ async function postsFor(scope, post) {
 function barksSection(p, barks, users) {
   const sound = soundFor(me.petType);
   return `
-    <section class="card barks" id="barks">
-      <h2>${sound.words}</h2>
+    <section class="card barks" data-post="${p.id}">
+      <header class="row barks-head">
+        <h2>${sound.words}</h2>
+        <span class="spacer"></span>
+        <button type="button" class="icon-btn" data-action="close-barks" aria-label="Close ${esc(sound.words.toLowerCase())}">${icon('close')}</button>
+      </header>
       <div class="bark-list">
         ${barks.length ? barks.map(c => barkRow(c, users.get(c.author), p)).join('') : `<p class="muted no-barks">No ${sound.words.toLowerCase()} yet. Start the conversation.</p>`}
       </div>
@@ -834,7 +838,7 @@ async function refreshBarks(postId) {
   const [p, list, users] = await Promise.all([db.get('posts', postId), db.byIndex('comments', 'postId', postId), usersMap()]);
   if (!p) return;
   const barks = list.filter(c => !blockedSet.has(c.author)).sort((a, b) => a.createdAt - b.createdAt);
-  const box = document.querySelector('.bark-list');
+  const box = document.querySelector(`.barks[data-post="${postId}"] .bark-list`);
   if (box) box.innerHTML = barks.length ? barks.map(c => barkRow(c, users.get(c.author), p)).join('')
     : `<p class="muted no-barks">No ${soundFor(me.petType).words.toLowerCase()} yet. Start the conversation.</p>`;
   p.barkCount = list.length;
@@ -847,6 +851,21 @@ function updateBarkCount(p) {
   card.querySelector('.bark-count').textContent = p.barkCount;
   card.querySelector('.bark-count + .lbl').textContent = countLabel(p.barkCount, me.petType);
 }
+
+// The comment button opens a post's comments right under it, and closes them again.
+actions['toggle-barks'] = async el => {
+  const id = el.dataset.id;
+  const open = document.querySelector(`.barks[data-post="${id}"]`);
+  if (open) { open.remove(); return; }
+  document.querySelectorAll('.barks').forEach(s => s.remove()); // one open at a time
+  const card = el.closest('.post');
+  const [p, list, users] = await Promise.all([db.get('posts', id), db.byIndex('comments', 'postId', id), usersMap()]);
+  if (!p || !card?.isConnected) return;
+  const barks = list.filter(c => !blockedSet.has(c.author)).sort((a, b) => a.createdAt - b.createdAt);
+  card.insertAdjacentHTML('afterend', barksSection(p, barks, users));
+};
+
+actions['close-barks'] = el => el.closest('.barks').remove();
 
 actions['delete-bark'] = async el => {
   if (el.disabled) return;
