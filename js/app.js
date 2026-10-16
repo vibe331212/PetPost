@@ -125,7 +125,7 @@ document.addEventListener('submit', e => {
 });
 document.addEventListener('dblclick', e => {
   const media = e.target.closest('.post .media');
-  if (!media) return;
+  if (!media || e.target.closest('button, .vid-bar')) return;
   const btn = media.closest('.post').querySelector('[data-action="lick"]');
   media.classList.remove('burst'); void media.offsetWidth; media.classList.add('burst');
   if (!btn.classList.contains('on')) actions.lick(btn);
@@ -345,10 +345,150 @@ function mediaEl(p, { autoplay = false } = {}) {
   // Reserving the picture's shape stops the page jumping as photos load.
   const shape = p.width && p.height ? ` style="aspect-ratio:${p.width}/${p.height}"` : '';
   if (p.mediaType === 'video') {
-    return `<video src="${src}#t=0.001" controls playsinline preload="metadata" ${autoplay ? 'autoplay' : ''} loop${shape}></video>`;
+    // Feed videos play by themselves when they scroll into view (see "videos in the feed" below).
+    return `<video src="${src}#t=0.001" class="feed-video" muted playsinline preload="metadata" ${autoplay ? 'autoplay' : ''} loop${shape}></video>
+      <span class="vid-paused" hidden>${icon('play')}</span>
+      <button type="button" class="vid-sound" data-action="video-sound" aria-label="${soundOn ? 'Turn sound off' : 'Turn sound on'}">${icon(soundOn ? 'sound' : 'mute')}</button>
+      <div class="vid-bar" role="slider" tabindex="0" aria-label="Video position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="vid-bar-fill"></span></div>`;
   }
   return `<img src="${src}" alt="Photo shared by ${esc(p.author)}" loading="lazy"${shape}>`;
 }
+
+// ---------- videos in the feed, like Instagram and TikTok:
+// the video you scroll to plays by itself, it stops when you scroll away, a tap pauses it,
+// and the speaker button turns sound on or off for every video until you turn it off again.
+let soundOn = false;
+const visible = new Map(); // video -> how much of it is on screen (0 to 1)
+const videoWatcher = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    if (e.isIntersecting) visible.set(e.target, e.intersectionRatio);
+    else { visible.delete(e.target); e.target.dataset.userPaused = ''; }
+  }
+  playMostVisible();
+}, { threshold: [0, 0.25, 0.5, 0.6, 0.75, 1] });
+
+function playMostVisible() {
+  let best = null, bestRatio = 0.6; // at least 60% on screen
+  for (const [v, r] of visible) {
+    if (!v.isConnected) { visible.delete(v); continue; }
+    if (r >= bestRatio && !v.dataset.userPaused) { best = v; bestRatio = r; }
+  }
+  document.querySelectorAll('video.feed-video').forEach(v => { if (v !== best && !v.paused) v.pause(); });
+  if (best && best.paused && !document.hidden) playVideo(best);
+}
+
+function playVideo(v) {
+  v.muted = !soundOn;
+  v.play().catch(() => {
+    // Phones only allow sound after a tap; fall back to playing silently.
+    if (!v.muted) { v.muted = true; setSound(false); v.play().catch(() => {}); }
+  });
+}
+
+function setSound(on) {
+  soundOn = on;
+  document.querySelectorAll('video.feed-video').forEach(v => { v.muted = !on || v.paused; });
+  document.querySelectorAll('.vid-sound').forEach(b => {
+    b.innerHTML = icon(on ? 'sound' : 'mute');
+    b.setAttribute('aria-label', on ? 'Turn sound off' : 'Turn sound on');
+  });
+}
+
+actions['video-sound'] = el => {
+  setSound(!soundOn);
+  const v = el.closest('.media')?.querySelector('video');
+  if (v && soundOn) { delete v.dataset.userPaused; playVideo(v); }
+  playMostVisible();
+};
+
+// Show the play sign on paused videos, and only ever let one video make sound.
+document.addEventListener('play', e => {
+  if (!e.target.matches?.('video.feed-video')) return;
+  e.target.parentElement.querySelector('.vid-paused')?.setAttribute('hidden', '');
+  document.querySelectorAll('video.feed-video').forEach(v => { if (v !== e.target) v.pause(); });
+}, true);
+document.addEventListener('pause', e => {
+  if (!e.target.matches?.('video.feed-video')) return;
+  if (e.target.dataset.userPaused) e.target.parentElement.querySelector('.vid-paused')?.removeAttribute('hidden');
+}, true);
+
+// One tap pauses or plays. Two quick taps are a Lick, so wait a moment to see if a second tap comes.
+let tapTimer = null;
+document.addEventListener('click', e => {
+  const v = e.target.closest('.media')?.querySelector('video.feed-video');
+  if (!v || e.target.closest('button, a, .vid-bar')) return;
+  clearTimeout(tapTimer);
+  if (e.detail > 1) return;
+  tapTimer = setTimeout(() => {
+    if (v.paused) { delete v.dataset.userPaused; playVideo(v); }
+    else { v.dataset.userPaused = '1'; v.pause(); }
+  }, 260);
+});
+
+// Watch every feed video as it appears on the page.
+new MutationObserver(() => {
+  document.querySelectorAll('video.feed-video:not([data-watched])').forEach(v => { v.dataset.watched = '1'; videoWatcher.observe(v); });
+}).observe(document.body, { childList: true, subtree: true });
+
+// The thin bar along the bottom shows how far through the video is. Drag it (or tap it) to skip.
+const barOf = v => v.parentElement?.querySelector('.vid-bar');
+function showProgress(v) {
+  const bar = barOf(v);
+  if (!bar || !v.duration) return;
+  const pct = (v.currentTime / v.duration) * 100;
+  bar.firstElementChild.style.width = `${pct}%`;
+  bar.setAttribute('aria-valuenow', Math.round(pct));
+}
+// Smooth while a video plays (timeupdate alone only fires a few times a second), idle otherwise.
+let ticking = false;
+function tick() {
+  const v = [...document.querySelectorAll('video.feed-video')].find(x => !x.paused);
+  if (!v) { ticking = false; return; }
+  showProgress(v);
+  requestAnimationFrame(tick);
+}
+document.addEventListener('playing', e => {
+  if (e.target.matches?.('video.feed-video') && !ticking) { ticking = true; requestAnimationFrame(tick); }
+}, true);
+document.addEventListener('loadedmetadata', e => { if (e.target.matches?.('video.feed-video')) showProgress(e.target); }, true);
+document.addEventListener('seeked', e => { if (e.target.matches?.('video.feed-video')) showProgress(e.target); }, true);
+
+function seekTo(bar, clientX) {
+  const v = bar.parentElement.querySelector('video');
+  if (!v?.duration) return;
+  const box = bar.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
+  v.currentTime = ratio * v.duration;
+  showProgress(v);
+}
+document.addEventListener('pointerdown', e => {
+  const bar = e.target.closest('.vid-bar');
+  if (!bar) return;
+  e.preventDefault();
+  bar.setPointerCapture(e.pointerId);
+  bar.classList.add('dragging');
+  seekTo(bar, e.clientX);
+});
+document.addEventListener('pointermove', e => {
+  const bar = e.target.closest?.('.vid-bar.dragging');
+  if (bar) seekTo(bar, e.clientX);
+});
+const stopDrag = e => e.target.closest?.('.vid-bar')?.classList.remove('dragging');
+document.addEventListener('pointerup', stopDrag);
+document.addEventListener('pointercancel', stopDrag);
+document.addEventListener('keydown', e => {
+  const bar = e.target.closest?.('.vid-bar');
+  const v = bar?.parentElement.querySelector('video');
+  if (!v?.duration || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+  e.preventDefault();
+  v.currentTime = Math.min(v.duration, Math.max(0, v.currentTime + (e.key === 'ArrowRight' ? 5 : -5)));
+});
+
+// Stop when you switch apps or lock the phone; carry on when you come back.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) document.querySelectorAll('video.feed-video').forEach(v => v.pause());
+  else playMostVisible();
+});
 
 function postCard(p, author, from = 'feed') {
   author = author || { username: p.author, displayName: p.author };

@@ -673,3 +673,19 @@ body::before {
 .report-list { list-style: none; margin: 0; padding: 0; }
 .report-list li { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
 .report-list li + li { border-top: 1px solid var(--line); }
+
+/* ---------- feed videos (play when scrolled to, tap to pause) */
+.vid-paused { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: #fff; }
+.vid-paused[hidden] { display: none; }
+.vid-paused .ic { width: 64px; height: 64px; padding: 16px; border-radius: 50%; background: rgba(0,0,0,.45); }
+.vid-sound {
+  position: absolute; right: 12px; bottom: 20px; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); border: 0;
+}
+.vid-sound .ic { width: 18px; height: 18px; }
+/* A thin progress bar along the bottom; the touch area is taller than it looks so it's easy to grab. */
+.vid-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 18px; display: flex; align-items: flex-end; cursor: pointer; touch-action: none; }
+.vid-bar::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.3); transition: height .15s; }
+.vid-bar-fill { position: relative; height: 3px; width: 0; background: #fff; transition: height .15s; }
+.vid-bar.dragging::before, .vid-bar.dragging .vid-bar-fill, .vid-bar:hover::before, .vid-bar:hover .vid-bar-fill { height: 6px; }
+.vid-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
