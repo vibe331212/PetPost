@@ -1427,7 +1427,8 @@ async function notifications() {
     if (p.createdAt > (since[p.author] || 0)) items.push({ type: 'post', who: p.author, post: p, at: p.createdAt });
   }
   // Reports about you or your posts. Who sent them stays private.
-  for (const r of reports) items.push({ type: 'report', who: null, post: r.postId ? mine.get(r.postId) : null, reason: r.reason, at: r.createdAt });
+  // Only the reason ("Spam"), never the reporter's own description after it.
+  for (const r of reports) items.push({ type: 'report', who: null, post: r.postId ? mine.get(r.postId) : null, reason: r.reason.split(': ')[0], at: r.createdAt });
   const map = new Map(users.map(u => [u.username, u]));
   const petpost = { username: 'petpost', displayName: 'PetPost' };
   return items.filter(n => n.at).sort((a, b) => b.at - a.at).slice(0, 80).map(n => ({ ...n, user: n.type === 'report' ? petpost : map.get(n.who) || { username: n.who, displayName: n.who } }));
