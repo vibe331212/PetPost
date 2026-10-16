@@ -150,10 +150,11 @@ function parts() {
 
 async function route() {
   closeViewer();
+  document.body.classList.remove('scroll-mode');
   if (!me) return renderAuth();
   if (!me.cameraAsked) return renderPermission();
   const [view = 'feed', a, b] = parts();
-  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople, notifications: viewNotifications, reports: viewReports };
+  const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople, notifications: viewNotifications, reports: viewReports, scroll: viewScroll };
   const fn = views[view] || viewFeed;
   if (draft && view !== 'create') resetDraft();
   shell(views[view] ? view : 'feed', a);
@@ -507,7 +508,9 @@ function postCard(p, author, from = 'feed') {
         ${own ? `<button class="icon-btn" data-action="delete-post" data-id="${p.id}" aria-label="Delete post">${icon('trash')}</button>`
               : `<button class="icon-btn" data-action="report" data-post="${p.id}" data-user="${esc(p.author)}" aria-label="Report post" title="Report">${icon('flag')}</button>`}
       </header>
-      <div class="media">${mediaEl(p)}<span class="lick-burst">${icon('lick')}</span></div>
+      <div class="media">${mediaEl(p)}<span class="lick-burst">${icon('lick')}</span>
+        <button type="button" class="scroll-open" data-action="scroll-mode" data-id="${p.id}" data-from="${esc(from)}" aria-label="Full screen" title="Full screen">${icon('expand')}</button>
+      </div>
       <div class="actions">
         <button class="act lick ${licked ? 'on' : ''}" data-action="lick" data-id="${p.id}" aria-pressed="${licked}">${icon('lick')}<span class="count">${n}</span><span class="lbl">${plural(n, 'Lick')}</span></button>
         <a class="act" href="#/post/${p.id}/${encodeURIComponent(from)}" data-action="toggle-barks" data-id="${p.id}">${icon('bark')}<span class="count bark-count">${b}</span><span class="lbl">${countLabel(b, me.petType)}</span></a>
@@ -520,6 +523,52 @@ function postCard(p, author, from = 'feed') {
       ${p.caption ? `<p class="caption"><strong>${esc(author.displayName)}</strong> ${esc(p.caption)}</p>` : ''}
     </article>`;
 }
+
+// ---------- scroll mode: full screen, one post at a time, and each swipe snaps to the next post (like TikTok)
+actions['scroll-mode'] = el => go(`#/scroll/${el.dataset.id}/${encodeURIComponent(el.dataset.from || 'feed')}`);
+actions['close-scroll'] = () => actions.back();
+
+async function viewScroll(main, id, from = 'feed') {
+  const p = await db.get('posts', id);
+  if (!p) { main.innerHTML = `<div class="card empty"><p>This post is no longer here.</p><a class="btn ghost" href="#/feed">Back to feed</a></div>`; return; }
+  const [users, list] = await Promise.all([usersMap(), postsFor(from, p)]);
+  const slide = x => {
+    const author = users.get(x.author) || { username: x.author, displayName: x.author };
+    const licked = x.licks.includes(me.username), n = x.licks.length, b = x.barkCount || 0;
+    return `
+      <article class="post slide" data-post="${x.id}">
+        <div class="media">${mediaEl(x)}<span class="lick-burst">${icon('lick')}</span></div>
+        <div class="slide-info">
+          <a class="slide-who" href="#/profile/${esc(author.username)}">${avatar(author, 'sm')}<span><strong>${esc(author.displayName)}</strong> <span class="sub">@${esc(author.username)} · ${ago(x.createdAt)}</span></span></a>
+          ${x.caption ? `<p class="slide-caption">${esc(x.caption)}</p>` : ''}
+        </div>
+        <div class="slide-rail">
+          <button class="act lick ${licked ? 'on' : ''}" data-action="lick" data-id="${x.id}" aria-pressed="${licked}">${icon('lick')}<span class="count">${n}</span><span class="lbl sr-only">${plural(n, 'Lick')}</span></button>
+          <a class="act" href="#/post/${x.id}/${encodeURIComponent(from)}">${icon('bark')}<span class="count">${b}</span><span class="sr-only">${countLabel(b, me.petType)}</span></a>
+          <button class="act" data-action="share" data-id="${x.id}" aria-label="Share">${icon('share')}</button>
+        </div>
+      </article>`;
+  };
+  main.innerHTML = `
+    <div class="scroller" tabindex="-1" aria-label="Scroll mode">
+      <button class="icon-btn scroll-close" data-action="close-scroll" aria-label="Leave scroll mode">${icon('close')}</button>
+      ${list.map(slide).join('')}
+    </div>`;
+  document.body.classList.add('scroll-mode');
+  const scroller = main.querySelector('.scroller');
+  main.querySelector(`.slide[data-post="${id}"]`)?.scrollIntoView({ block: 'start' });
+  scroller.focus({ preventScroll: true }); // so the arrow keys move between posts on a computer
+  // Remember which post you're on, so coming back (say, from its comments) lands on the same one.
+  const seen = new IntersectionObserver(entries => {
+    const e = entries.find(x => x.isIntersecting);
+    if (e && location.hash.startsWith('#/scroll/')) history.replaceState(null, '', `#/scroll/${e.target.dataset.post}/${encodeURIComponent(from)}`);
+  }, { root: scroller, threshold: 0.6 });
+  scroller.querySelectorAll('.slide').forEach(s => seen.observe(s));
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('scroll-mode') && !document.querySelector('dialog[open]')) actions.back();
+});
 
 actions.lick = async el => {
   const p = await db.get('posts', el.dataset.id);

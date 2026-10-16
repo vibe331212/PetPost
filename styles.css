@@ -708,3 +708,41 @@ body.dragging-profile { -webkit-user-select: none; user-select: none; }
 .moments .ring .avatar { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, var(--lick))); }
 .moments .ring .avatar span { width: auto; height: auto; background: none; font-size: inherit; }
 .moments .ring.pin { width: 66px; height: 66px; }
+
+/* ---------- scroll mode (full screen, snaps to one post at a time) */
+.media .scroll-open {
+  position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); border: 0; z-index: 2;
+}
+.media .scroll-open .ic { width: 17px; height: 17px; }
+body.scroll-mode { overflow: hidden; }
+body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
+.scroller {
+  position: fixed; inset: 0; z-index: 90; background: #000; overflow-y: auto; outline: none;
+  scroll-snap-type: y mandatory; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.scroller::-webkit-scrollbar { display: none; }
+.scroller .slide { position: relative; height: 100vh; height: 100dvh; scroll-snap-align: start; scroll-snap-stop: always; border-radius: 0; background: #000; color: #fff; }
+.scroller .slide .media { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.scroller .slide .media img, .scroller .slide .media video { width: 100%; height: 100%; max-height: none; object-fit: contain; }
+.scroll-close {
+  position: fixed; z-index: 3; top: max(14px, env(safe-area-inset-top)); left: 14px;
+  color: #fff; background: rgba(0,0,0,.45); border-radius: 50%;
+}
+.slide-info {
+  position: absolute; left: 0; right: 76px; bottom: 0; z-index: 1; pointer-events: none;
+  padding: 60px 16px max(30px, calc(env(safe-area-inset-bottom) + 22px));
+  background: linear-gradient(transparent, rgba(0,0,0,.6));
+}
+.slide-info a { pointer-events: auto; }
+.slide-who { display: flex; align-items: center; gap: 10px; color: #fff; }
+.slide-who .sub { color: rgba(255,255,255,.75); }
+.slide-caption { margin: 8px 0 0; overflow-wrap: anywhere; }
+.slide-rail {
+  position: absolute; right: 10px; z-index: 2; bottom: max(84px, calc(env(safe-area-inset-bottom) + 76px));
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.slide-rail .act { flex-direction: column; gap: 2px; color: #fff; background: rgba(0,0,0,.35); border-radius: 999px; padding: 10px 8px; min-width: 52px; }
+.slide-rail .act .ic { width: 26px; height: 26px; }
+.slide-rail .act .count { font-size: 12px; font-weight: 600; }
+.scroller .slide .vid-sound { bottom: max(30px, calc(env(safe-area-inset-bottom) + 22px)); right: 18px; z-index: 2; }
