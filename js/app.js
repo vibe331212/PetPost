@@ -9,6 +9,7 @@ import { soundFor, countLabel, PET_TYPES } from './sounds.js';
 import { showTrophy } from './celebrate.js';
 import { openStickerEditor } from './stickers.js';
 import { ageText, trickName, cardImage, goalImage } from './petcard.js';
+import { PUSH_PUBLIC_KEY } from './config.js';
 
 const $app = document.getElementById('app');
 const scene = new Scene(document.getElementById('scene'));
@@ -316,6 +317,7 @@ async function withBusy(form, fn) {
 forms.signin = (form, fd) => withBusy(form, async () => {
   me = await auth.signIn(fd.get('username'), fd.get('password'));
   await refreshBlocked();
+  syncPush();
   syncNativeCare();
   applyTheme(me.theme);
   go('#/feed');
@@ -333,6 +335,7 @@ forms.signup = (form, fd) => withBusy(form, async () => {
 });
 
 actions['sign-out'] = async () => {
+  await turnOffPush().catch(() => {}); // the next person on this phone shouldn't get your notifications
   await auth.signOut();
   me = null;
   syncNativeCare();
@@ -2271,6 +2274,7 @@ async function viewNotifications(main) {
     <section class="card">
       <h1>Notifications</h1>
       <p class="muted">Licks and ${esc(soundFor(me.petType).words.toLowerCase())} on your posts, new followers, new posts from people you follow, and reports about you.</p>
+      <div class="push-slot"></div>
     </section>
     <section class="card notif-card">
       ${list.length ? `<ul class="notifs">${list.map(n => {
@@ -2288,10 +2292,92 @@ async function viewNotifications(main) {
       }).join('')}</ul>` : `
         <div class="empty">${icon('bell', 'big')}<h2>Nothing yet</h2><p class="muted">When someone licks or ${esc(soundFor(me.petType).word.toLowerCase())}s on your posts or follows you, it shows up here.</p><a class="btn primary" href="#/people">${icon('users')}Find people</a></div>`}
     </section>`;
+  renderPushCard();
   me.notifSeen = Date.now();
   await saveMe();
   updateBell();
 }
+
+// ---------- real phone notifications (web push)
+// Your phone buzzes for licks, barks, follows, new posts and reports, even when PetPost is closed.
+// The database tells the `push` function (supabase/functions/push), which sends them.
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const onHomeScreen = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushWorks = () => !Native.on && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const keyBytes = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
+
+async function pushRegistration() {
+  // Gives up after a few seconds if offline mode never started (so buttons don't hang).
+  return Promise.race([navigator.serviceWorker.ready, new Promise((_, no) => setTimeout(() => no(new Error('PetPost is still loading. Try again in a moment.')), 6000))]);
+}
+async function currentPush() {
+  if (!pushWorks()) return null;
+  return (await pushRegistration()).pushManager.getSubscription();
+}
+
+async function pushState() {
+  if (Native.on) return 'native';
+  if (!pushWorks()) return isIOS && !onHomeScreen() ? 'homescreen' : 'unsupported';
+  if (Notification.permission === 'denied') return 'blocked';
+  try { return Notification.permission === 'granted' && await currentPush() ? 'on' : 'off'; } catch { return 'off'; }
+}
+
+async function turnOnPush() {
+  const answer = await Notification.requestPermission();
+  if (answer !== 'granted') return false;
+  const reg = await pushRegistration();
+  const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(PUSH_PUBLIC_KEY) });
+  await db.savePush(sub.toJSON());
+  return true;
+}
+async function turnOffPush() {
+  const sub = await currentPush();
+  if (!sub) return;
+  await db.removePush(sub.endpoint);
+  await sub.unsubscribe();
+}
+// If this phone already has notifications on, make sure they go to whoever is signed in.
+async function syncPush() {
+  try {
+    if (!pushWorks() || Notification.permission !== 'granted') return;
+    const sub = await currentPush();
+    if (sub) await db.savePush(sub.toJSON());
+  } catch { /* try again next time */ }
+}
+
+async function renderPushCard() {
+  const slot = document.querySelector('.push-slot');
+  if (!slot) return;
+  const state = await pushState();
+  const body = {
+    on: `<span class="push-text"><strong>Phone notifications are on</strong><span class="muted small">Your phone will buzz when something happens, even when PetPost is closed.</span></span>
+         <button class="btn ghost sm" data-action="push-off">Turn off</button>`,
+    off: `<span class="push-text"><strong>Get phone notifications</strong><span class="muted small">Find out right away when someone licks, barks, follows you or posts.</span></span>
+          <button class="btn primary sm" data-action="push-on">Turn on</button>`,
+    blocked: `<span class="push-text"><strong>Notifications are blocked</strong><span class="muted small">Turn them on for PetPost in your phone's Settings, then come back here.</span></span>`,
+    homescreen: `<span class="push-text"><strong>Want phone notifications?</strong><span class="muted small">On iPhone, add PetPost to your Home Screen first: tap Share, then Add to Home Screen, and open it from there.</span></span>`,
+  }[state];
+  slot.innerHTML = body ? `<div class="push-card ${state}">${icon('bell')}${body}</div>` : '';
+}
+
+actions['push-on'] = async el => {
+  el.disabled = true;
+  try {
+    if (await turnOnPush()) { toast('Phone notifications are on'); Native.send({ type: 'haptic', style: 'success' }); }
+    else toast('Notifications were not allowed');
+  } catch (err) { toast(`Could not turn on notifications: ${err.message}`); }
+  renderPushCard();
+};
+actions['push-off'] = async el => {
+  el.disabled = true;
+  try { await turnOffPush(); toast('Phone notifications are off'); } catch (err) { toast(`Could not turn them off: ${err.message}`); }
+  renderPushCard();
+};
+
+// Tapping a notification opens PetPost on the right screen.
+navigator.serviceWorker?.addEventListener('message', e => {
+  if (e.data?.type === 'open' && typeof e.data.url === 'string' && e.data.url.startsWith('#/')) go(e.data.url);
+});
 
 // ---------- reports (only admins see this tab)
 let reportGroups = [];
@@ -3268,7 +3354,7 @@ actions.install = async () => {
 (async function boot() {
   try {
     me = await auth.currentUser();
-    if (me) await refreshBlocked();
+    if (me) { await refreshBlocked(); syncPush(); }
   } catch (err) {
     console.error(err);
   }

@@ -1,6 +1,10 @@
 // Service worker: lets PetPost open and run without an internet connection.
 // Bump VERSION whenever app files change so phones pick up the update.
+<<<<<<< Updated upstream
 const VERSION = 'petpost-v37';
+=======
+const VERSION = 'petpost-v36';
+>>>>>>> Stashed changes
 const SHELL = [
   './',
   './index.html',
@@ -61,4 +65,27 @@ self.addEventListener('fetch', event => {
       .catch(() => caches.match(req, { ignoreSearch: true })
         .then(hit => hit || (req.mode === 'navigate' ? caches.match('./index.html') : Response.error()))),
   );
+});
+
+// Real phone notifications: show them, and open PetPost on the right screen when one is tapped.
+self.addEventListener('push', event => {
+  let note = {};
+  try { note = event.data.json(); } catch { note = { body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(note.title || 'PetPost', {
+    body: note.body || '',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: note.tag,
+    data: { url: note.url || '#/notifications' },
+  }));
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const url = event.notification.data?.url || '#/notifications';
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const open = list.find(c => c.url.startsWith(self.registration.scope));
+    if (open) { open.postMessage({ type: 'open', url }); return open.focus(); }
+    return self.clients.openWindow(new URL(`./${url}`, self.registration.scope).href);
+  }));
 });

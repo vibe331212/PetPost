@@ -841,6 +841,7 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .viewer.holding .bars, .viewer.holding header, .viewer.holding .viewer-foot { opacity: 0; }
 .viewer input { -webkit-user-select: text; user-select: text; }
 
+<<<<<<< Updated upstream
 /* ---------- polls, quizzes, question boxes and ratings: stickers on top of a post's photo or video */
 .interact {
   position: absolute; z-index: 3; width: min(230px, 78%); transform: translate(-50%, -50%) scale(var(--s, 1));
@@ -889,3 +890,12 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 .i-handle { position: absolute; right: -11px; bottom: -11px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); cursor: nwse-resize; touch-action: none; }
 .i-size[hidden], .i-size-hint[hidden] { display: none; }
 .i-size input { accent-color: var(--accent); }
+=======
+/* Phone notifications card on the Notifications page */
+.push-card { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.push-card > .ic { width: 22px; height: 22px; flex: none; color: var(--accent); }
+.push-card.on > .ic { color: #2fbf71; }
+.push-card.blocked > .ic { color: var(--muted); }
+.push-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.push-card .btn { flex: none; }
+>>>>>>> Stashed changes

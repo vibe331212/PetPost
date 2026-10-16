@@ -244,6 +244,13 @@ export async function del(store, key) {
 export async function report({ postId = null, username = null, reason }) {
   check(await sb.from('reports').insert({ reporter: myId, post_id: postId, user_id: username ? idOf(username) : null, reason }));
 }
+// ---------- phone notifications: save or forget this phone's push address
+export async function savePush(sub) {
+  check(await sb.rpc('save_push_subscription', { sub }));
+}
+export async function removePush(endpoint) {
+  await sb.rpc('remove_push_subscription', { target: endpoint });
+}
 // Reports about your account or posts. Never says who sent them.
 export async function reportsAboutMe() {
   if (!myId) return [];
