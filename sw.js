@@ -1,10 +1,6 @@
 // Service worker: lets PetPost open and run without an internet connection.
 // Bump VERSION whenever app files change so phones pick up the update.
-<<<<<<< Updated upstream
-const VERSION = 'petpost-v37';
-=======
-const VERSION = 'petpost-v36';
->>>>>>> Stashed changes
+const VERSION = 'petpost-v38';
 const SHELL = [
   './',
   './index.html',
