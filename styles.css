@@ -209,7 +209,7 @@ body[data-tone="dark"] .chips.privacy .chip { color: #5fe39a; }
 .name { font-weight: 600; }
 .name:hover { text-decoration: underline; }
 .sub { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.media { position: relative; background: #000; }
+.media { position: relative; background: #000; overflow: hidden; } /* keeps a big or turned sticker on the picture */
 .media img, .media video { width: 100%; max-height: 72vh; object-fit: contain; margin: 0 auto; }
 .lick-burst { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; opacity: 0; color: #fff; }
 .lick-burst .ic { width: 96px; height: 96px; filter: drop-shadow(0 4px 16px rgba(0,0,0,.4)); }
@@ -843,7 +843,7 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 
 /* ---------- polls, quizzes, question boxes and ratings: stickers on top of a post's photo or video */
 .interact {
-  position: absolute; z-index: 3; width: min(230px, 78%); transform: translate(-50%, -50%) scale(var(--s, 1));
+  position: absolute; z-index: 3; width: min(230px, 78%); transform: translate(-50%, -50%) rotate(var(--r, 0deg)) scale(var(--s, 1));
   display: flex; flex-direction: column; gap: 6px; padding: 10px 11px; border-radius: 14px; text-align: left;
   background: rgba(255,255,255,.95); color: #12151b; box-shadow: 0 6px 22px rgba(0,0,0,.28); font-size: 13.5px;
 }

@@ -535,11 +535,13 @@ function postCard(p, author, from = 'feed') {
 const interactPosts = new Map();
 const clampPos = v => Math.min(0.92, Math.max(0.08, +v || 0.5));
 const clampSize = v => Math.min(1.5, Math.max(0.6, +v || 1));
+// Turned by this many degrees (-180 to 180); snaps straight when it's within a few degrees of level.
+const clampTurn = v => { const d = ((((+v || 0) + 180) % 360) + 360) % 360 - 180; return Math.abs(d) < 4 ? 0 : Math.round(d); };
 function interactCard(p) {
   const own = p.author === me.username;
   // A sticker on top of the photo or video, where (and how big) the poster put it.
   const pos = p.iPos || {};
-  const place = `left:${clampPos(pos.x ?? 0.5) * 100}%;top:${clampPos(pos.y ?? 0.72) * 100}%;--s:${clampSize(pos.s ?? 1)}`;
+  const place = `left:${clampPos(pos.x ?? 0.5) * 100}%;top:${clampPos(pos.y ?? 0.72) * 100}%;--s:${clampSize(pos.s ?? 1)};--r:${clampTurn(pos.r)}deg`;
   const card = (type, body) => { interactPosts.set(p.id, p); return `<div class="interact" data-post="${p.id}" data-type="${type}" style="${place}">${body}<p class="i-foot"></p></div>`; };
   if (p.poll || p.quiz) {
     const it = p.poll || p.quiz;
@@ -1425,7 +1427,7 @@ async function viewCreate(main, arg) {
   const goals = (await db.byIndex('goals', 'owner', me.username)).filter(g => !g.completedAt);
   const goalId = arg?.startsWith('goal-') ? arg.slice(5) : '';
   const goal = goals.find(g => g.id === goalId);
-  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '', iPos: { x: 0.5, y: 0.72, s: 1 } };
+  draft = { kind: arg === 'moment' ? 'moment' : 'photo', file: null, result: null, busy: false, previewURL: null, items: [], cur: 0, extra: '', iPos: { x: 0.5, y: 0.72, s: 1, r: 0 } };
   main.innerHTML = `
     <section class="card create">
       <h1>New post</h1>
@@ -1548,15 +1550,19 @@ function renderStickerPreview() {
   const card = preview.querySelector('.interact');
   card.classList.add('editing');
   card.insertAdjacentHTML('beforeend', '<span class="i-handle" aria-hidden="true"></span>');
-  root.querySelector('.i-size input').value = Math.round(draft.iPos.s * 100);
+  root.querySelector('.i-size:not(.i-turn) input').value = Math.round(draft.iPos.s * 100);
+  root.querySelector('.i-turn input').value = draft.iPos.r || 0;
 }
 
 function placeSticker(card) {
   card.style.left = `${draft.iPos.x * 100}%`;
   card.style.top = `${draft.iPos.y * 100}%`;
   card.style.setProperty('--s', draft.iPos.s);
-  const slider = document.querySelector('.create .i-size input');
+  card.style.setProperty('--r', `${draft.iPos.r || 0}deg`);
+  const slider = document.querySelector('.create .i-size:not(.i-turn) input');
   if (slider) slider.value = Math.round(draft.iPos.s * 100);
+  const turn = document.querySelector('.create .i-turn input');
+  if (turn) turn.value = draft.iPos.r || 0;
 }
 
 let stickerDrag = null;
@@ -1568,15 +1574,23 @@ document.addEventListener('pointerdown', e => {
   const center = { x: box.left + draft.iPos.x * box.width, y: box.top + draft.iPos.y * box.height };
   stickerDrag = {
     card, box, center, resize: !!e.target.closest('.i-handle'),
-    from: { x: e.clientX, y: e.clientY, pos: { ...draft.iPos }, dist: Math.hypot(e.clientX - center.x, e.clientY - center.y) || 1 },
+    from: {
+      x: e.clientX, y: e.clientY, pos: { ...draft.iPos },
+      dist: Math.hypot(e.clientX - center.x, e.clientY - center.y) || 1,
+      angle: Math.atan2(e.clientY - center.y, e.clientX - center.x),
+    },
   };
   card.setPointerCapture(e.pointerId);
 });
 document.addEventListener('pointermove', e => {
   if (!stickerDrag) return;
   const { card, box, center, resize, from } = stickerDrag;
-  if (resize) draft.iPos.s = clampSize(from.pos.s * Math.hypot(e.clientX - center.x, e.clientY - center.y) / from.dist);
-  else {
+  if (resize) {
+    // The corner handle resizes and turns at once, the way it works on Instagram.
+    draft.iPos.s = clampSize(from.pos.s * Math.hypot(e.clientX - center.x, e.clientY - center.y) / from.dist);
+    const turned = (Math.atan2(e.clientY - center.y, e.clientX - center.x) - from.angle) * 180 / Math.PI;
+    draft.iPos.r = clampTurn((from.pos.r || 0) + turned);
+  } else {
     draft.iPos.x = clampPos(from.pos.x + (e.clientX - from.x) / box.width);
     draft.iPos.y = clampPos(from.pos.y + (e.clientY - from.y) / box.height);
   }
@@ -1586,8 +1600,9 @@ const endStickerDrag = () => { stickerDrag = null; };
 document.addEventListener('pointerup', endStickerDrag);
 document.addEventListener('pointercancel', endStickerDrag);
 document.addEventListener('input', e => {
-  if (e.target.matches?.('.create .i-size input')) {
-    draft.iPos.s = clampSize(e.target.value / 100);
+  if (e.target.matches?.('.create .i-size input, .create .i-turn input')) {
+    if (e.target.closest('.i-turn')) draft.iPos.r = clampTurn(e.target.value);
+    else draft.iPos.s = clampSize(e.target.value / 100);
     const card = document.querySelector('.create .preview .interact');
     if (card) placeSticker(card);
   } else if (e.target.closest?.('.create form[data-form="publish"] .extras')) renderStickerPreview();
@@ -1789,8 +1804,9 @@ function showResult(root) {
       ? `<video src="${draft.previewURL}#t=0.001" controls playsinline autoplay loop muted></video>`
       : `<img src="${draft.previewURL}" alt="Preview">`}</div>
     ${r.type === 'image' ? `<button type="button" class="btn ghost sticker-btn" data-action="stickers">${icon('sparkle')}${count ? `Edit stickers (${count})` : 'Add stickers'}</button>` : ''}
-    <label class="field i-size" hidden><span>Poll or question size</span><input type="range" min="60" max="150" step="5" value="100"></label>
-    <p class="muted small i-size-hint" hidden>Drag it on the picture to move it. Drag its corner, or use the slider, to make it bigger or smaller.</p>`;
+    <label class="field i-size" hidden><span>Size</span><input type="range" min="60" max="150" step="5" value="100"></label>
+    <label class="field i-size i-turn" hidden><span>Turn</span><input type="range" min="-180" max="180" step="1" value="0"></label>
+    <p class="muted small i-size-hint" hidden>Drag it on the picture to move it. Drag its corner to make it bigger, smaller or turned, or use the sliders.</p>`;
   root.querySelector('.publish').hidden = false;
   renderStickerPreview();
 }
