@@ -924,3 +924,22 @@ body.scroll-mode .topbar, body.scroll-mode .nav { visibility: hidden; }
 /* AI sample accounts */
 .ai-tag { display: inline-block; width: auto; margin-left: 5px; padding: 0 4px; border-radius: 4px; font-size: 9px; line-height: 14px; font-weight: 700; letter-spacing: .04em; vertical-align: 2px; color: var(--muted); border: 1px solid var(--line); background: none; }
 h1 .ai-tag { font-size: 12px; }
+
+/* ---------- feedback for the PetPost team */
+.fb-kinds { flex-wrap: wrap; }
+.fb-shot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fb-preview { position: relative; }
+.fb-preview[hidden] { display: none; }
+.fb-preview img { display: block; max-width: 140px; max-height: 140px; border-radius: 10px; border: 1px solid var(--line); }
+.fb-preview .icon-btn { position: absolute; top: -10px; right: -10px; background: var(--surface-solid); border: 1px solid var(--line); }
+.section-title { margin: 18px 4px 8px; display: flex; align-items: center; gap: 8px; }
+.feedback-item { display: flex; flex-direction: column; gap: 10px; }
+.feedback-item header { gap: 8px; flex-wrap: wrap; }
+.fb-tag { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; color: #fff; background: var(--muted); }
+.fb-tag.bug { background: #e5484d; } .fb-tag.idea { background: #2fbf71; }
+.fb-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fb-image img { display: block; max-width: 100%; max-height: 360px; border-radius: 12px; border: 1px solid var(--line); }
+.fb-details summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 600; }
+.fb-details dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0 0; font-size: 13px; }
+.fb-details dt { color: var(--muted); font-weight: 600; }
+.fb-details dd { margin: 0; overflow-wrap: anywhere; }

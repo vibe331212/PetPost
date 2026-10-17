@@ -85,6 +85,17 @@ async function notesFor(table: string, r: any): Promise<Note[]> {
       : `${who.name} ${pastFor(who.petType)} on your trophy: "${text.length > 90 ? text.slice(0, 90) + '...' : text}"`;
     return [{ to: r.owner, body, url: `#/profile/${owner.username}/trophies`, tag: `trophy-${r.kind}-${r.id}` }];
   }
+  if (table === 'feedback') {
+    // A bug, idea or other note for the PetPost team: tell every admin (except whoever sent it).
+    const who = r.user_id ? await person(r.user_id) : null;
+    const { data: admins } = await sb.from('admins').select('user_id');
+    const what = r.kind === 'bug' ? 'bug report' : r.kind === 'idea' ? 'idea' : 'note';
+    const text = String(r.message || '');
+    return (admins || []).filter(a => a.user_id !== r.user_id).map(a => ({
+      to: a.user_id, body: `New ${what} from ${who?.name || 'someone'}: "${text.length > 90 ? text.slice(0, 90) + '...' : text}"`,
+      url: '#/reports', tag: `feedback-${r.id}`,
+    }));
+  }
   if (table === 'posts') {
     const who = await person(r.author);
     if (!who) return [];

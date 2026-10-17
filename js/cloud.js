@@ -349,6 +349,22 @@ export async function momentActivityForMe() {
   return data.map(toResponse).filter(r => r.user);
 }
 
+// ---------- feedback for the PetPost team (bugs, ideas, anything else); only admins can read it
+export async function sendFeedback({ kind, message, screenshot, details }) {
+  const path = screenshot ? await upload(`${myId}/feedback-${Date.now()}.${extFor(screenshot.type)}`, screenshot) : null;
+  check(await sb.from('feedback').insert({ user_id: myId, kind, message, screenshot_path: path, details }));
+}
+export async function adminFeedback() {
+  const { data, error } = await sb.from('feedback').select('id,user_id,kind,message,screenshot_path,details,created_at').order('created_at', { ascending: false }).limit(200);
+  if (error) return []; // older database without feedback yet
+  await loadProfiles();
+  return data.map(r => ({ id: r.id, user: nameOf(r.user_id), kind: r.kind, message: r.message, screenshot: mediaUrl(r.screenshot_path), details: r.details || {}, createdAt: ms(r.created_at) }));
+}
+export async function clearFeedback(id) {
+  const cleared = check(await sb.from('feedback').delete().eq('id', id).select('id'));
+  if (!cleared.length) throw new Error('Nothing was cleared. The database may need updating.');
+}
+
 // ---------- admins (people who run PetPost and look at reports)
 export const isAdmin = () => amAdmin;
 export async function adminReports() {

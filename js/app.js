@@ -196,6 +196,8 @@ async function route() {
   if (!me) return renderAuth();
   if (!me.cameraAsked) return renderPermission();
   const [view = 'feed', a, b] = parts();
+  // The last few pages you visited, sent along with bug reports so we can find where things went wrong.
+  if (recentPages.at(-1) !== location.hash) recentPages = [...recentPages, location.hash].slice(-5);
   const views = { feed: viewFeed, create: viewCreate, post: viewPost, profile: viewProfile, goals: viewGoals, modes: viewModes, care: viewCare, people: viewPeople, notifications: viewNotifications, reports: viewReports, scroll: viewScroll };
   const fn = views[view] || viewFeed;
   if (draft && view !== 'create') resetDraft();
@@ -2114,6 +2116,7 @@ async function viewProfile(main, username = me.username, tab = 'posts') {
       <div class="row wrap profile-actions">
         ${own ? `
           <button class="btn ghost" data-action="edit-profile">${icon('edit')}Edit profile</button>
+          <button class="btn ghost" data-action="feedback">${icon('bark')}Send feedback</button>
           <button class="btn ghost" data-action="pet-card" data-user="${esc(u.username)}">${icon('card')}Pet card</button>
           <button class="btn ghost" data-action="sign-out">${icon('logout')}Sign out</button>` : `
           <button class="btn ${iFollow ? 'ghost' : 'primary'}" data-action="follow" data-user="${esc(u.username)}">${icon(iFollow ? 'check' : 'userPlus')}${iFollow ? 'Following' : 'Follow'}</button>
@@ -2555,7 +2558,9 @@ async function viewReports(main) {
   if (!db.isAdmin()) { main.innerHTML = `<div class="card empty"><p>Only people who run PetPost can see reports.</p></div>`; return; }
   // One card per reported post (or per reported account), with every report about it.
   const groups = new Map();
-  for (const r of await db.adminReports()) {
+  const [reports, feedback] = await Promise.all([db.adminReports(), db.adminFeedback()]);
+  feedbackList = feedback;
+  for (const r of reports) {
     const key = r.post ? `post:${r.post.id}` : `user:${r.reportedUser || 'unknown'}`;
     if (!groups.has(key)) groups.set(key, { post: r.post, user: r.post?.author || r.reportedUser, reports: [] });
     groups.get(key).reports.push(r);
@@ -2567,8 +2572,9 @@ async function viewReports(main) {
   main.innerHTML = `
     <section class="card">
       <h1>Reports</h1>
-      <p class="muted">Posts and accounts people reported. Dismiss a report once you have looked at it, or remove the post.</p>
+      <p class="muted">Feedback people sent, and posts and accounts people reported. Mark feedback done or dismiss a report once you've looked at it.</p>
     </section>
+    ${feedbackSection(feedback)}
     ${reportGroups.length ? reportGroups.map((g, i) => `
       <section class="card report-group">
         <header class="row">
@@ -2597,6 +2603,117 @@ async function viewReports(main) {
       </section>`).join('') : `
       <section class="card empty">${icon('flag', 'big')}<h2>No reports</h2><p class="muted">When someone reports a post or an account, it shows up here.</p></section>`}`;
 }
+
+// ---------- feedback for the PetPost team: bugs, ideas and anything else
+let recentPages = [];
+const FEEDBACK_KINDS = {
+  bug: ['Bug', 'What happened? What did you expect instead?'],
+  idea: ['Idea', 'What would make PetPost better?'],
+  other: ['Other', "What's on your mind?"],
+};
+
+actions.feedback = () => {
+  const d = document.createElement('dialog');
+  d.className = 'modal';
+  d.innerHTML = `
+    <form data-form="feedback" class="stack" data-kind="bug">
+      <header class="row"><h2>Send feedback</h2><span class="spacer"></span><button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">${icon('close')}</button></header>
+      <p class="muted">Found a bug or have an idea? It goes straight to the people who run PetPost.</p>
+      <div class="seg fb-kinds">${Object.entries(FEEDBACK_KINDS).map(([k, [label]]) => `<button type="button" class="${k === 'bug' ? 'on' : ''}" data-action="feedback-kind" data-kind="${k}">${label}</button>`).join('')}</div>
+      <label class="field"><span class="sr-only">Your message</span><textarea name="message" rows="5" maxlength="2000" required placeholder="${esc(FEEDBACK_KINDS.bug[1])}"></textarea></label>
+      <div class="fb-shot">
+        <label class="btn ghost sm">${icon('photo')}<span>Add a screenshot</span><input type="file" name="screenshot" accept="image/*" hidden></label>
+        <div class="fb-preview" hidden><img alt="Your screenshot"><button type="button" class="icon-btn sm" data-action="feedback-shot-remove" aria-label="Remove screenshot">${icon('close')}</button></div>
+      </div>
+      <p class="muted small">To help track bugs down, this also sends the last few pages you visited, your phone or browser, and the app version.</p>
+      <p class="form-error" role="alert"></p>
+      <button class="btn primary block">Send</button>
+    </form>`;
+  document.body.append(d);
+  d.addEventListener('close', () => { if (d.shotURL) URL.revokeObjectURL(d.shotURL); d.remove(); });
+  d.querySelector('[name="screenshot"]').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (d.shotURL) URL.revokeObjectURL(d.shotURL);
+    d.shotURL = URL.createObjectURL(file);
+    const box = d.querySelector('.fb-preview');
+    box.querySelector('img').src = d.shotURL;
+    box.hidden = false;
+  });
+  d.showModal();
+};
+
+actions['feedback-kind'] = el => {
+  const form = el.closest('form');
+  form.dataset.kind = el.dataset.kind;
+  form.querySelectorAll('.fb-kinds button').forEach(b => b.classList.toggle('on', b === el));
+  form.message.placeholder = FEEDBACK_KINDS[el.dataset.kind][1];
+};
+actions['feedback-shot-remove'] = el => {
+  const form = el.closest('form');
+  form.screenshot.value = '';
+  form.querySelector('.fb-preview').hidden = true;
+};
+
+// The app version is the name of the offline copy (petpost-v42 and so on).
+async function appVersion() {
+  try { return (await caches.keys()).filter(k => k.startsWith('petpost-v')).sort((a, b) => parseInt(b.slice(9)) - parseInt(a.slice(9)))[0] || 'unknown'; }
+  catch { return 'unknown'; }
+}
+
+forms.feedback = (form, fd) => withBusy(form, async () => {
+  const message = String(fd.get('message') || '').trim();
+  if (!message) throw new Error('Type a message first.');
+  const file = fd.get('screenshot');
+  const screenshot = file && file.size ? (await processPhoto(file, { max: 1600 })).blob : null;
+  await db.sendFeedback({
+    kind: form.dataset.kind, message, screenshot,
+    details: {
+      pages: recentPages.slice(0, -1), // the pages before this one (feedback is sent from the profile)
+      device: navigator.userAgent, screen: `${innerWidth}x${innerHeight}`,
+      app: Native.on ? 'iPhone app' : isInstalled() ? 'Home screen app' : 'Website', version: await appVersion(),
+    },
+  });
+  form.closest('dialog').close();
+  toast('Thanks! Your feedback was sent to the PetPost team.');
+});
+
+// Feedback on the Reports page: newest first, with the screenshot and details, and a Done button.
+let feedbackList = [];
+function feedbackSection(list) {
+  if (!list.length) return '';
+  const label = { bug: 'Bug', idea: 'Idea', other: 'Other' };
+  return `
+    <h2 class="section-title">Feedback <span class="report-count">${list.length}</span></h2>
+    ${list.map((f, i) => `
+      <section class="card feedback-item">
+        <header class="row">
+          <span class="fb-tag ${esc(f.kind)}">${label[f.kind] || 'Note'}</span>
+          <span class="muted small">from ${f.user ? `<a href="#/profile/${esc(f.user)}">@${esc(f.user)}</a>` : 'a deleted account'} · ${ago(f.createdAt)}</span>
+        </header>
+        <p class="fb-message">${esc(f.message)}</p>
+        ${f.screenshot ? `<a href="${esc(f.screenshot)}" target="_blank" rel="noopener" class="fb-image"><img src="${esc(f.screenshot)}" alt="Screenshot sent with this feedback" loading="lazy"></a>` : ''}
+        <details class="fb-details"><summary>Details</summary>
+          <dl>
+            ${f.details.pages?.length ? `<dt>Pages before</dt><dd>${f.details.pages.map(esc).join(' → ')}</dd>` : ''}
+            ${f.details.app ? `<dt>App</dt><dd>${esc(f.details.app)} · ${esc(f.details.version || '')}</dd>` : ''}
+            ${f.details.screen ? `<dt>Screen</dt><dd>${esc(f.details.screen)}</dd>` : ''}
+            ${f.details.device ? `<dt>Device</dt><dd>${esc(f.details.device)}</dd>` : ''}
+          </dl>
+        </details>
+        <div class="row"><span class="spacer"></span><button class="btn ghost sm" data-action="feedback-done" data-index="${i}">${icon('check')}Done</button></div>
+      </section>`).join('')}
+    <h2 class="section-title">Reported posts and accounts</h2>`;
+}
+
+actions['feedback-done'] = async el => {
+  const f = feedbackList[el.dataset.index];
+  try {
+    await db.clearFeedback(f.id);
+    toast('Marked done');
+    route();
+  } catch (err) { toast(`Could not clear it: ${err.message}`); }
+};
 
 actions['dismiss-reports'] = async el => {
   const g = reportGroups[el.dataset.group];
